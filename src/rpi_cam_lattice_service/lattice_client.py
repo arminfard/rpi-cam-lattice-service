@@ -1,5 +1,8 @@
 """Builds the EntityManager, VideoManager and TaskManager Connect clients with
 TLS and auth wired in.
+
+The TaskManager surface is limited to what an agent needs:
+listening for tasks routed to the entitym and reporting their status.
 """
 
 from __future__ import annotations
@@ -8,7 +11,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from protobuf import Oneof
-from protobuf.wkt import any_pb
 from connectrpc.protocol import ProtocolType
 from pyqwest import SyncClient, SyncHTTPTransport
 
@@ -23,9 +25,7 @@ from anduril.taskmanager.v1.task_manager_api_pub_connect import (
     TaskManagerAPIClientSync,
 )
 from anduril.taskmanager.v1.task_manager_api_pub_pb import (
-    CreateTaskRequest,
     EntityIds,
-    GetTaskRequest,
     ListenAsAgentRequest,
     ListenAsAgentResponse,
     UpdateStatusRequest,
@@ -33,11 +33,9 @@ from anduril.taskmanager.v1.task_manager_api_pub_pb import (
 from anduril.taskmanager.v1.task_pub_pb import (
     ErrorCode,
     Principal,
-    Relations,
     Status,
     StatusUpdate,
     System,
-    Task,
     TaskError,
     TaskStatus,
     TaskVersion,
@@ -226,50 +224,9 @@ class LatticeClient:
         )
         return response.task.version
 
-    def create_task(
-        self,
-        *,
-        display_name: str,
-        type_url: str,
-        assignee_entity_id: str,
-        author_service_name: str,
-        specification_bytes: bytes = b"",
-        description: str = "",
-        timeout_ms: int | None = 30000,
-    ) -> Task:
-        """Create a task assigned to an agent entity (used by the driver script).
-
-        The specification is a ``google.protobuf.Any`` carrying ``type_url`` and
-        the serialized task message; for the empty Start/Stop messages the
-        payload is empty.
-        """
-        request = CreateTaskRequest(
-            display_name=display_name,
-            description=description,
-            specification=any_pb.Any(type_url=type_url, value=specification_bytes),
-            author=Principal(
-                agent=Oneof("system", System(service_name=author_service_name))
-            ),
-            relations=Relations(
-                assignee=Principal(
-                    agent=Oneof("system", System(entity_id=assignee_entity_id))
-                )
-            ),
-            is_executed_elsewhere=False,
-        )
-        response = self._tasks.create_task(
-            request, headers=self._auth.headers(), timeout_ms=timeout_ms
-        )
-        return response.task
-
-    def get_task(self, task_id: str, *, timeout_ms: int | None = 30000) -> Task:
-        """Read a task back (used by the driver script)."""
-        response = self._tasks.get_task(
-            GetTaskRequest(task_id=task_id),
-            headers=self._auth.headers(),
-            timeout_ms=timeout_ms,
-        )
-        return response.task
+    # Deliberately no create_task here: the daemon is an *agent*. Tasks are
+    # created by operators (Lattice UI) or, for testing only, by
+    # scripts/send_task.py, which extends this client for that purpose.
 
     def close(self) -> None:
         # Close the pyqwest client.

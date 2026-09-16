@@ -203,6 +203,22 @@ export BUF_TOKEN="$(cat ~/workspace/secrets/afard-token-rpi.txt)@schema-registry
 cd task-def && buf lint && buf build && buf push
 ```
 
+**Who creates tasks.** Operators do, from the Lattice UI. The service is an
+*agent*: it only advertises, listens, executes and reports status, and its
+Lattice client deliberately has no task-creation call (`tests/test_agent_only.py`
+enforces this). The one exception is `scripts/send_task.py`, a separate
+validation driver that stands in for an operator during testing; it is not
+installed as part of the service and the systemd unit never runs it.
+
+**Operating from the Lattice UI.** Once the `task-def/` schemas are pushed and
+the service is running, select the camera asset (`ENTITY_NAME`) in Lattice and
+open its tasking menu: the advertised `Start` and `Stop` tasks are offered
+because the entity is a friendly asset whose `task_catalog` lists their type
+URLs. Assigning one routes it to the service, and the task's status moves to
+`EXECUTING` then `DONE_OK` in the UI, with the camera sensor's state switching
+between `OPERATIONAL` and `OFF`. A failure surfaces as `DONE_NOT_OK` with the
+error message from the start/stop command.
+
 **How it works.** On startup the service publishes the entity with a
 `task_catalog` listing both type URLs, and opens a `ListenAsAgent` stream for
 the entity on its own daemon thread (`tasking.py`). For each `ExecuteRequest`
