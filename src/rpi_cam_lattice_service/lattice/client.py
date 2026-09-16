@@ -74,7 +74,7 @@ class LatticeClient:
         self._video.delete_srt_ingress(ingress_id, timeout_ms=timeout_ms)
 
     # -- tasks (agent side only) ---------------------------------------------
-    # Deliberately no task creation here: the daemon is an agent. Tasks are
+    # This daemon is an agent. Tasks are
     # created by operators (Lattice UI) or, for testing only, by
     # scripts/send_task.py.
 

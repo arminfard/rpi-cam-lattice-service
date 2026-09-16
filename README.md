@@ -209,22 +209,11 @@ export BUF_TOKEN="$(cat ~/workspace/secrets/afard-token-rpi.txt)@schema-registry
 cd task-def && buf lint && buf build && buf push
 ```
 
-**How it works.** On startup the service publishes the entity with a
-`task_catalog` listing both type URLs, and opens a `ListenAsAgent` stream for
-the entity on its own daemon thread (`tasking/handler.py`). For each `ExecuteRequest`
-it matches the specification's type URL against the catalog, reports
-`EXECUTING`, runs the matching `CameraControl` action on a worker thread, and
-reports `DONE_OK` (or `DONE_NOT_OK` with a `TaskError` for an unknown type, a
-failing command, or a cancellation). Every status update carries a strictly
-increasing `status_version`, continuing from the version the task arrived with.
-The stream reconnects on any error and asks Lattice for heartbeats so a dead
-connection is visible in the logs.
-
 **Ingress lifecycle (`camera/ingress.py`, `camera/control.py`).** Every Stop cleans up the
 Lattice side and every Start rebuilds it, in an order that never leaves
 MediaMTX pushing at a dead stream or the entity advertising one:
 
-1. **Start**: `CreateIngressStream` under a *fresh* id (`<ENTITY_ID>-<uuid>`),
+1. **Start**: `CreateIngressStream` under a *fresh* id (a UUID; Lattice allows 4-36 characters),
    write the returned SRT push URL to `SRT_TARGET_FILE`, then run
    `TASK_START_COMMAND` (use `systemctl restart`, not `start`, so MediaMTX
    re-reads the file). If the command fails the new ingress is archived again.

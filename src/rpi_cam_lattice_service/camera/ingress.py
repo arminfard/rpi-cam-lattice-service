@@ -69,7 +69,8 @@ class VideoIngress:
         with self._lock:
             if self._info is not None:
                 return self._info
-            ingress_id = f"{self._entity_id}-{uuid.uuid4()}"
+
+            ingress_id = str(uuid.uuid4())
             info = self._client.create_srt_ingress(
                 title=self._title,
                 passphrase=self._passphrase,

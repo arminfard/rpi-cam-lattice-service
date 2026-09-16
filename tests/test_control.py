@@ -8,6 +8,8 @@ archiving the ingress.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from rpi_cam_lattice_service.camera.control import CameraControl, CameraControlError
@@ -61,7 +63,9 @@ def test_start_registers_fresh_ingress_and_writes_target_before_command(tmp_path
     assert control.streaming is True
     assert client.calls[0][0] == "create"
     ingress_id = client.calls[0][1]
-    assert ingress_id.startswith("rpi-cam-01-")
+    # Lattice accepts 4-36 characters: a bare UUID4 string.
+    uuid.UUID(ingress_id)
+    assert len(ingress_id) == 36
     assert control.video_id == ingress_id
     assert target.read_text() == f"SRT_TARGET=srt://lattice:8890?streamid={ingress_id}\n"
     assert marker.read_text() == target.read_text()
