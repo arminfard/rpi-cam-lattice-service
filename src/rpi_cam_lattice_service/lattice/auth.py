@@ -20,8 +20,8 @@ import json
 import threading
 import time
 
-from .config import Config
-from .logging_setup import get_logger
+from ..config import Config
+from ..logging_setup import get_logger
 
 logger = get_logger(__name__)
 

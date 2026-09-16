@@ -19,7 +19,7 @@ import sys
 sys.path.insert(0, "src")
 
 from rpi_cam_lattice_service import config as config_module  # noqa: E402
-from rpi_cam_lattice_service.lattice_client import LatticeClient  # noqa: E402
+from rpi_cam_lattice_service.lattice import LatticeClient  # noqa: E402
 
 
 def main() -> int:

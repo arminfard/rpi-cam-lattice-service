@@ -1,24 +1,26 @@
 """CLI entry point.
 
-Loads config, builds the Lattice client, registers an SRT video ingress with
-Lattice's VideoManager (so MediaMTX has somewhere to push and the entity can
-advertise the video id), then runs the publishing service for the camera entity.
+Loads config, builds the Lattice client, brings the camera stream up (registers
+an SRT video ingress with Lattice's VideoManager so MediaMTX has somewhere to
+push and the entity can advertise the video id), then runs the publishing
+service and the task handler for the camera entity. On exit the stream is
+stopped and its ingress archived.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 
 from . import config as config_module
+from .camera.control import CameraControl
+from .camera.entity import build_camera_publish_request
+from .camera.ingress import VideoIngress
+from .camera.source import CameraSource
 from .config import Config, ConfigError
-from .control import CameraControl
-from .lattice_client import LatticeClient, SrtIngressInfo
+from .lattice import LatticeClient
 from .logging_setup import configure, get_logger
 from .service import Service
-from .sources import CameraSource
-from .tasking import TaskHandler
-from .worker import build_camera_publish_request
+from .tasking.handler import TaskHandler
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -33,54 +35,42 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _register_video_ingress(
-    client: LatticeClient, config: Config, logger
-) -> SrtIngressInfo | None:
-    """Register the SRT ingress with Lattice and persist the push URL.
-
-    Best-effort: on failure the service still publishes the entity (without a
-    video reference), which matters when the endpoint isn't reachable yet.
-    """
-    if not config.video_enabled:
-        logger.info("video ingress disabled (VIDEO_ENABLED=false)")
-        return None
-    title = config.video_title or f"{config.entity_name} (SRT)"
-    try:
-        info = client.create_srt_ingress(
-            title=title,
+def _build_control(client: LatticeClient, config: Config, logger) -> CameraControl:
+    """Wire the task-driven camera control, with the video ingress when enabled."""
+    video = None
+    if config.video_enabled:
+        video = VideoIngress(
+            client,
+            entity_id=config.entity_id,
+            title=config.video_title or f"{config.entity_name} (SRT)",
             passphrase=config.srt_passphrase,
-            ingress_id=config.entity_id,
+            srt_target_file=config.srt_target_file,
         )
+    else:
+        logger.info("video ingress disabled (VIDEO_ENABLED=false)")
+    return CameraControl(
+        start_command=config.task_start_command,
+        stop_command=config.task_stop_command,
+        streaming=False,
+        video=video,
+    )
+
+
+def _initial_start(control: CameraControl, logger) -> None:
+    """Bring the stream up at boot.
+
+    Best-effort: on failure (for example an unreachable endpoint) the service
+    still publishes the camera entity, reporting the sensor OFF and no video,
+    and an operator's Start task is the retry.
+    """
+    try:
+        control.start()
     except Exception as exc:
         logger.warning(
-            "could not register SRT ingress with VideoManager; publishing "
-            "without a video reference",
+            "could not start the camera stream at boot; publishing with the "
+            "sensor OFF and no video reference (send a Start task to retry)",
             error=str(exc),
         )
-        return None
-
-    logger.info(
-        "registered SRT ingress",
-        video_id=info.video_id,
-        push_url=info.push_url,
-    )
-    _write_srt_target(config.srt_target_file, info.push_url, logger)
-    return info
-
-
-def _write_srt_target(path: str, push_url: str, logger) -> None:
-    """Write the SRT push URL as an EnvironmentFile for the MediaMTX unit."""
-    if not path:
-        return
-    try:
-        parent = os.path.dirname(path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(path, "w") as handle:
-            handle.write(f"SRT_TARGET={push_url}\n")
-        logger.info("wrote SRT target for MediaMTX", srt_target_file=path)
-    except OSError as exc:
-        logger.warning("could not write SRT target file", path=path, error=str(exc))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -101,23 +91,14 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("failed to initialize Lattice client", error=str(exc))
         return 1
 
+    control = _build_control(client, config, logger)
     try:
-        info = _register_video_ingress(client, config, logger)
-        video_id = info.video_id if info else None
-
         source = CameraSource(
             latitude_degrees=config.camera_latitude,
             longitude_degrees=config.camera_longitude,
             altitude_hae_meters=config.camera_altitude_hae_meters,
         )
 
-        # Task-driven camera state. The publish loop reads it every tick so the
-        # entity reflects Start/Stop; the task handler writes it.
-        control = CameraControl(
-            start_command=config.task_start_command,
-            stop_command=config.task_stop_command,
-            streaming=True,
-        )
         task_handler = None
         if config.tasking_enabled:
             task_handler = TaskHandler(
@@ -132,12 +113,15 @@ def main(argv: list[str] | None = None) -> int:
         catalog_urls = task_handler.task_specification_urls if task_handler else None
 
         def request_builder(entity_id, created_time, state):
+            # Read the live control state every tick so Start/Stop show up on
+            # the entity (sensor state, and the Media item only while an
+            # ingress exists).
             return build_camera_publish_request(
                 config,
                 entity_id,
                 created_time,
                 state,
-                video_id=video_id,
+                video_id=control.video_id,
                 task_specification_urls=catalog_urls,
                 streaming=control.streaming,
             )
@@ -150,8 +134,16 @@ def main(argv: list[str] | None = None) -> int:
             entity_id=config.entity_id,
             task_handler=task_handler,
         )
+        # Start/Stop push their outcome to the asset immediately (Media item
+        # added or cleared) instead of waiting for the next 1 Hz tick.
+        control.on_change = service.publish_now
+
+        _initial_start(control, logger)
         return service.run()
     finally:
+        # Leave nothing pushing at, or advertised as, a stream that no longer
+        # has a producer.
+        control.shutdown()
         client.close()
 
 

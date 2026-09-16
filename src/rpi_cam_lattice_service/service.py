@@ -1,8 +1,7 @@
-"""Service lifecycle: worker loop, signal handling, graceful shutdown.
+"""Service lifecycle: publish loop, task thread, signal handling, graceful shutdown.
 
-Ports ``internal/service/service.go`` and the ``worker`` loop from
-``internal/service/worker.go``. Signals are handled on the main thread (a
-Python requirement); the 1 Hz publish loop runs on a background thread.
+Signals are handled on the main thread (a Python requirement); the 1 Hz
+publish loop and the task stream each run on a background thread.
 """
 
 from __future__ import annotations
@@ -10,18 +9,16 @@ from __future__ import annotations
 import signal
 import threading
 import time
-import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 
 from anduril.entitymanager.v1.entity_manager_api_pub_pb import PublishEntityRequest
 
+from .camera.source import CameraSource, CameraState
 from .config import Config
-from .lattice_client import LatticeClient
+from .lattice import LatticeClient
 from .logging_setup import get_logger
-from .sources import DroneSimulator, Source, State
-from .tasking import TaskHandler
-from .worker import build_publish_request
+from .tasking.handler import TaskHandler
 
 logger = get_logger(__name__)
 
@@ -30,7 +27,7 @@ PUBLISH_TIMEOUT_MS = 1000
 SHUTDOWN_TIMEOUT_SECONDS = 30.0
 
 # (entity_id, created_time, state) -> PublishEntityRequest
-RequestBuilder = Callable[[str, datetime, State], PublishEntityRequest]
+RequestBuilder = Callable[[str, datetime, CameraState], PublishEntityRequest]
 
 
 class Service:
@@ -41,20 +38,22 @@ class Service:
         config: Config,
         client: LatticeClient,
         *,
-        source: Source | None = None,
-        request_builder: RequestBuilder | None = None,
-        entity_id: str | None = None,
+        source: CameraSource,
+        request_builder: RequestBuilder,
+        entity_id: str,
         task_handler: TaskHandler | None = None,
     ) -> None:
         self._config = config
         self._client = client
-        self._source = source or DroneSimulator()
-        self._request_builder = request_builder or build_publish_request
-        # A stable id keeps a fixed sensor's identity across restarts; fall back
-        # to a random id when none is supplied (the drone-sim behavior).
-        self._entity_id = entity_id
+        self._source = source
+        self._request_builder = request_builder
         # Optional Lattice task handler; runs the agent stream on its own thread.
         self._task_handler = task_handler
+        # The entity's identity is fixed for the life of the service so that
+        # both the periodic loop and on-demand publishes describe the same
+        # entity (a stable id keeps the camera's identity across restarts).
+        self._entity_id = entity_id
+        self._created_time = datetime.now(timezone.utc)
 
         self._stop = threading.Event()
         self._reload_requested = threading.Event()
@@ -146,23 +145,37 @@ class Service:
         logger.info("received signal", signal=signal.Signals(signum).name)
         self._reload_requested.set()
 
+    # -- publishing ----------------------------------------------------------
+
+    @property
+    def entity_id(self) -> str:
+        return self._entity_id
+
+    def publish_now(self, *, timeout_ms: int = PUBLISH_TIMEOUT_MS) -> None:
+        """Publish the entity immediately from the current source/control state.
+
+        Used by Start/Stop transitions so the asset's Media item and sensor
+        state change as part of the task rather than on the next tick. Raises
+        on failure; the periodic loop keeps republishing regardless.
+        """
+        state = self._source.next_state()
+        request = self._request_builder(self._entity_id, self._created_time, state)
+        self._client.publish_entity(request, timeout_ms=timeout_ms)
+
     # -- worker --------------------------------------------------------------
 
     def _worker(self) -> None:
-        entity_id = self._entity_id or str(uuid.uuid4())
-        created_time = datetime.now(timezone.utc)
+        entity_id = self._entity_id
         logger.info(
             "worker initialized",
             entity_id=entity_id,
-            created_at=created_time.isoformat(),
+            created_at=self._created_time.isoformat(),
         )
 
         # Tick every PUBLISH_INTERVAL_SECONDS; wait() returns True when stopped.
         while not self._stop.wait(PUBLISH_INTERVAL_SECONDS):
             try:
-                state = self._source.next_state()
-                request = self._request_builder(entity_id, created_time, state)
-                self._client.publish_entity(request, timeout_ms=PUBLISH_TIMEOUT_MS)
+                self.publish_now()
                 logger.debug("operation completed successfully", entity_id=entity_id)
             except Exception as exc:
                 logger.error("operation failed", error=str(exc))

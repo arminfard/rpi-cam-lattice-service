@@ -17,12 +17,9 @@ from anduril.taskmanager.v1.task_api_pub_pb import CancelRequest, ExecuteRequest
 from anduril.taskmanager.v1.task_manager_api_pub_pb import Heartbeat, ListenAsAgentResponse
 from anduril.taskmanager.v1.task_pub_pb import Status, Task, TaskVersion
 
-from rpi_cam_lattice_service.control import CameraControl, CameraControlError
-from rpi_cam_lattice_service.tasking import (
-    TaskHandler,
-    task_name_from_type_url,
-    task_type_url,
-)
+from rpi_cam_lattice_service.camera.control import CameraControl, CameraControlError
+from rpi_cam_lattice_service.tasking.definitions import task_name_from_type_url, task_type_url
+from rpi_cam_lattice_service.tasking.handler import TaskHandler
 
 PACKAGE = "anduril.sample_app_rpi_cam.camera.v1alpha"
 AGENT = "rpi-cam-01"

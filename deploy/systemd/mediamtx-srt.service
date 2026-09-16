@@ -11,6 +11,8 @@ Type=simple
 WorkingDirectory=/home/airhead/workspace/rpi-cam-lattice-service
 # The SRT push destination (srt://...) written by rpi-cam-lattice-service as
 # SRT_TARGET=<url>. Keep this path in sync with SRT_TARGET_FILE in .env.
+# The URL changes on every Start task (a new Lattice ingress each time); the
+# Lattice service restarts this unit via TASK_START_COMMAND so it re-reads it.
 EnvironmentFile=/home/airhead/workspace/rpi-cam-lattice-service/srt_target.env
 ExecStart=/home/airhead/workspace/rpi-cam-lattice-service/mediamtx /home/airhead/workspace/rpi-cam-lattice-service/mediamtx.yml
 Restart=always

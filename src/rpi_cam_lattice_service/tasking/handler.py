@@ -20,6 +20,7 @@ Lifecycle invariants (see the Lattice "Integrate an agent" guide):
 The handler runs in-process on its own daemon thread (started by ``Service``)
 but depends only on ``LatticeClient`` and ``CameraControl``, so it can be
 hosted by a separate entry point later if isolation becomes worth the cost.
+The task names and type-URL helpers live in ``definitions.py``.
 """
 
 from __future__ import annotations
@@ -31,31 +32,16 @@ from datetime import datetime, timezone
 from anduril.taskmanager.v1.task_manager_api_pub_pb import ListenAsAgentResponse
 from anduril.taskmanager.v1.task_pub_pb import ErrorCode, Status, Task
 
-from .control import CameraControl
-from .lattice_client import LatticeClient
-from .logging_setup import get_logger
+from ..camera.control import CameraControl
+from ..lattice import LatticeClient
+from ..logging_setup import get_logger
+from .definitions import TASK_START, TASK_STOP, task_name_from_type_url, task_type_url
 
 logger = get_logger(__name__)
-
-TYPE_URL_PREFIX = "type.googleapis.com/"
-# The task message names this agent understands (see task-def/).
-TASK_START = "Start"
-TASK_STOP = "Stop"
-SUPPORTED_TASKS = (TASK_START, TASK_STOP)
 
 DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
 DEFAULT_RECONNECT_DELAY_SECONDS = 2.0
 UPDATE_STATUS_TIMEOUT_MS = 10_000
-
-
-def task_type_url(package: str, name: str) -> str:
-    """Build the type URL Lattice uses to identify a task definition."""
-    return f"{TYPE_URL_PREFIX}{package}.{name}"
-
-
-def task_name_from_type_url(type_url: str) -> str:
-    """Return the message name (last dotted component) of a type URL."""
-    return type_url.rsplit("/", 1)[-1].rsplit(".", 1)[-1]
 
 
 class _ActiveTask:

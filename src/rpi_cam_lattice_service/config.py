@@ -69,9 +69,10 @@ class Config:
     camera_altitude_hae_meters: float = 1048.0
 
     # --- Video (Lattice VideoManager SRT ingress) ---
-    # When enabled, the service registers an SRT ingress stream with Lattice's
-    # VideoManager at startup, advertises the returned video id on the entity
-    # (Media -> MediaItem), and writes the SRT push URL for MediaMTX to consume.
+    # When enabled, every Start (including boot) registers a new SRT ingress
+    # stream with Lattice's VideoManager, advertises the returned video id on
+    # the entity (Media -> MediaItem), and writes the SRT push URL for MediaMTX
+    # to consume; every Stop (including exit) archives the ingress again.
     video_enabled: bool = True
     video_title: str = ""
     srt_passphrase: str = ""

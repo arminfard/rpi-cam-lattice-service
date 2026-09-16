@@ -38,8 +38,8 @@ from anduril.taskmanager.v1.task_pub_pb import (  # noqa: E402
 )
 
 from rpi_cam_lattice_service import config as config_module  # noqa: E402
-from rpi_cam_lattice_service.lattice_client import LatticeClient  # noqa: E402
-from rpi_cam_lattice_service.tasking import SUPPORTED_TASKS, task_type_url  # noqa: E402
+from rpi_cam_lattice_service.lattice import LatticeClient  # noqa: E402
+from rpi_cam_lattice_service.tasking.definitions import SUPPORTED_TASKS, task_type_url  # noqa: E402
 
 TERMINAL = {Status.DONE_OK, Status.DONE_NOT_OK}
 
@@ -82,14 +82,14 @@ class TaskDriverClient(LatticeClient):
             ),
             is_executed_elsewhere=False,
         )
-        response = self._tasks.create_task(
+        response = self._tasks.stub.create_task(
             request, headers=self._auth.headers(), timeout_ms=timeout_ms
         )
         return response.task
 
     def get_task(self, task_id: str, *, timeout_ms: int | None = 30000) -> Task:
         """Read a task back."""
-        response = self._tasks.get_task(
+        response = self._tasks.stub.get_task(
             GetTaskRequest(task_id=task_id),
             headers=self._auth.headers(),
             timeout_ms=timeout_ms,

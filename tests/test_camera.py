@@ -10,8 +10,8 @@ from anduril.entitymanager.v1.types_pub_pb import Template
 from anduril.ontology.v1.type_pub_pb import Disposition, Environment
 
 from rpi_cam_lattice_service.config import Config
-from rpi_cam_lattice_service.sources import CameraSource
-from rpi_cam_lattice_service.worker import build_camera_publish_request
+from rpi_cam_lattice_service.camera.entity import build_camera_publish_request
+from rpi_cam_lattice_service.camera.source import CameraSource
 
 
 def _config() -> Config:
@@ -34,8 +34,7 @@ def test_camera_source_is_stationary():
     s2 = src.next_state()
     assert s1.latitude_degrees == s2.latitude_degrees == 37.1234
     assert s1.longitude_degrees == -122.5678
-    assert s1.speed_mps == 0.0
-    assert (s1.velocity_e_mps, s1.velocity_n_mps, s1.velocity_u_mps) == (0.0, 0.0, 0.0)
+    assert s1.altitude_hae_meters == 30.0
 
 
 def test_camera_entity_identity_and_sensor():
@@ -68,11 +67,13 @@ def test_video_id_advertised_as_media_item():
     assert item.type == MediaType.VIDEO
 
 
-def test_no_video_id_means_no_media():
+def test_no_video_id_means_empty_media_list():
     cfg = _config()
     st = CameraSource(cfg.camera_latitude, cfg.camera_longitude, cfg.camera_altitude_hae_meters).next_state()
     req = build_camera_publish_request(cfg, cfg.entity_id, datetime.now(timezone.utc), st, video_id=None)
-    assert req.entity.media is None
+    # Explicitly empty (not absent) so a previously advertised item is cleared.
+    assert req.entity.media is not None
+    assert list(req.entity.media.media) == []
     assert len(req.to_binary()) > 0
 
 

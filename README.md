@@ -23,7 +23,7 @@ The app demonstrates two `systemd` services that cooperate:
 ```mermaid
 flowchart TD
     subgraph svc["rpi-cam-lattice-service (Python)"]
-        vm["CreateIngressStream(srt)"]
+        vm["VideoIngress: Create / DeleteIngressStream(srt)"]
         em["PublishEntity (1 Hz heartbeat)"]
         th["TaskHandler: ListenAsAgent + UpdateStatus"]
         cc["CameraControl (streaming on/off)"]
@@ -35,12 +35,12 @@ flowchart TD
     vm --> lattice
     lattice -.->|"returns { video_id, srt push URL }"| vm
     vm -->|"writes SRT_TARGET=&lt;url&gt;"| env
-    vm -->|"advertises video_id on entity (Media)"| lattice
-    em -->|"entity + task_catalog"| lattice
+    em -->|"entity + task_catalog + Media(video_id)"| lattice
     lattice -.->|"Start / Stop tasks"| th
     th -->|"EXECUTING, DONE_OK"| lattice
-    th -->|"start/stop command"| cc
-    cc -.->|"sensor OPERATIONAL / OFF"| em
+    th -->|"start / stop"| cc
+    cc -->|"Start: create, then restart MediaMTX; Stop: stop MediaMTX, then archive"| vm
+    cc -.->|"sensor OPERATIONAL / OFF, video_id or none"| em
 
     subgraph pipe["Media pipeline"]
         cam["Pi Camera"] --> mtx["MediaMTX (rpiCamera)"]
@@ -61,18 +61,25 @@ systemd unit loads so the `runOnReady` ffmpeg command can read it as
 
 ```
 src/rpi_cam_lattice_service/
-  main.py            entry point: config, client, register SRT ingress, run
-  config.py          .env + env-var config (auth, TLS, camera location, video)
-  auth.py            static token OR OAuth2 client-credentials (static preferred)
-  lattice_client.py  EntityManager + VideoManager + TaskManager Connect clients
+  main.py            entry point: config, client, wiring, boot-time Start, run
+  config.py          .env + env-var config (auth, TLS, camera, video, tasking)
+  logging_setup.py   structured JSON logging
   service.py         lifecycle: 1 Hz publish loop, task thread, signals, shutdown
-  worker.py          State -> Entity mapping (camera + drone builders, task_catalog)
-  tasking.py         task handler: ListenAsAgent stream, Start/Stop dispatch, status
-  control.py         CameraControl: task-driven stream state + start/stop commands
-  sources/
-    base.py          source interface + plain-Python State
-    camera.py        stationary Raspberry Pi camera source (default)
-    drone_sim.py     the UAV flight simulator (retained for tests)
+  lattice/           Lattice API plumbing (imports nothing above it)
+    transport.py     pyqwest HTTP/2 client with TLS (Anduril CA support)
+    auth.py          static token OR OAuth2 client-credentials (static preferred)
+    entities.py      EntityManager: publish_entity, get_entity
+    video.py         VideoManager: create/delete (archive) SRT ingress, SrtIngressInfo
+    tasks.py         TaskManager, agent side only: listen_as_agent, update_task_status
+    client.py        LatticeClient facade over the three clients
+  camera/            the camera path
+    source.py        CameraState (fixed geodetic position) + CameraSource
+    entity.py        CameraState + control state -> Entity (sensor, Media, task_catalog)
+    control.py       CameraControl: Start/Stop sequencing, MediaMTX commands, publish hook
+    ingress.py       VideoIngress: one SRT ingress at a time, writes srt_target.env
+  tasking/           Lattice tasking, agent side
+    definitions.py   Start/Stop names and type-URL helpers
+    handler.py       TaskHandler: ListenAsAgent stream, dispatch, status lifecycle
 task-def/            custom task definitions (Buf module for the Schema Registry)
   buf.yaml
   anduril.sample_app_rpi_cam.camera.v1alpha/camera_tasks.proto   Start {} and Stop {}
@@ -84,7 +91,7 @@ scripts/
   install-mediamtx.sh  download pinned MediaMTX (v1.16.1) arm64 on the Pi
   verify.py            read the published entity back from Lattice
   send_task.py         dispatch a Start/Stop task and watch it complete
-tests/                 attitude math, drone sim, camera + entity mapping, tasking
+tests/                 camera + entity mapping, control/ingress lifecycle, tasking, agent-only guard
 ```
 
 ## SDK packages
@@ -140,7 +147,7 @@ take precedence (so systemd `Environment=`/`EnvironmentFile=` works).
 |---|---|
 | `TASKING_ENABLED` | Advertise the task catalog and listen for tasks (default `true`). |
 | `TASK_PACKAGE` | Protobuf package of the task definitions (default `anduril.sample_app_rpi_cam.camera.v1alpha`); must match `task-def/`. |
-| `TASK_START_COMMAND` / `TASK_STOP_COMMAND` | Shell commands that start/stop the stream (e.g. `sudo systemctl start mediamtx-srt`). Empty = state-only. |
+| `TASK_START_COMMAND` / `TASK_STOP_COMMAND` | Shell commands that bring the stream up/down (e.g. `sudo systemctl restart mediamtx-srt` / `... stop mediamtx-srt`). Empty = state-only. |
 | `TASK_HEARTBEAT_INTERVAL_MS` | Heartbeat interval requested on the agent stream (default `30000`). |
 
 ## Run
@@ -190,8 +197,8 @@ The camera is a **taskable agent**. Two custom task definitions live in
 
 | Task | Type URL | Effect |
 |---|---|---|
-| `Start` | `type.googleapis.com/anduril.sample_app_rpi_cam.camera.v1alpha.Start` | run `TASK_START_COMMAND`, sensor `OPERATIONAL` |
-| `Stop`  | `type.googleapis.com/anduril.sample_app_rpi_cam.camera.v1alpha.Stop`  | run `TASK_STOP_COMMAND`, sensor `OFF` |
+| `Start` | `type.googleapis.com/anduril.sample_app_rpi_cam.camera.v1alpha.Start` | `CreateIngressStream` (new id), write `SRT_TARGET`, run `TASK_START_COMMAND`; sensor `OPERATIONAL`, `Media` advertises the new video id |
+| `Stop`  | `type.googleapis.com/anduril.sample_app_rpi_cam.camera.v1alpha.Stop`  | run `TASK_STOP_COMMAND`, then `DeleteIngressStream`; sensor `OFF`, `Media` cleared |
 
 **Publish the definitions** to the Lattice Schema Registry once (an operator
 can only assign a task whose type Lattice knows; publishing registers it for
@@ -204,7 +211,7 @@ cd task-def && buf lint && buf build && buf push
 
 **How it works.** On startup the service publishes the entity with a
 `task_catalog` listing both type URLs, and opens a `ListenAsAgent` stream for
-the entity on its own daemon thread (`tasking.py`). For each `ExecuteRequest`
+the entity on its own daemon thread (`tasking/handler.py`). For each `ExecuteRequest`
 it matches the specification's type URL against the catalog, reports
 `EXECUTING`, runs the matching `CameraControl` action on a worker thread, and
 reports `DONE_OK` (or `DONE_NOT_OK` with a `TaskError` for an unknown type, a
@@ -213,10 +220,35 @@ increasing `status_version`, continuing from the version the task arrived with.
 The stream reconnects on any error and asks Lattice for heartbeats so a dead
 connection is visible in the logs.
 
+**Ingress lifecycle (`camera/ingress.py`, `camera/control.py`).** Every Stop cleans up the
+Lattice side and every Start rebuilds it, in an order that never leaves
+MediaMTX pushing at a dead stream or the entity advertising one:
+
+1. **Start**: `CreateIngressStream` under a *fresh* id (`<ENTITY_ID>-<uuid>`),
+   write the returned SRT push URL to `SRT_TARGET_FILE`, then run
+   `TASK_START_COMMAND` (use `systemctl restart`, not `start`, so MediaMTX
+   re-reads the file). If the command fails the new ingress is archived again.
+2. **Stop**: run `TASK_STOP_COMMAND` first, then `DeleteIngressStream`. Lattice
+   *archives* the record rather than deleting it (it stays retrievable under
+   its id), which is why the next Start must not reuse the id. If archiving
+   fails the task ends `DONE_NOT_OK`, the sensor already reads `OFF`, and the
+   id is kept so a repeated Stop retries it.
+3. **Entity update, as part of the task.** Each transition ends by publishing
+   the asset immediately (`Service.publish_now`): after Start the `Media`
+   items carry the new ingress id; after Stop they are published as an
+   explicitly empty list, which clears the archived item. The task only
+   reports `DONE_OK` once that publish succeeds; the 1 Hz loop then keeps the
+   same state. (The docs' `OverrideEntity` route is for tools that are *not*
+   the publisher: an override would mask this service's own later publishes.)
+4. **Boot** runs Start best-effort; on failure the entity is published with the
+   sensor `OFF` and no video, and an operator's Start is the retry. **Exit**
+   (SIGTERM) runs the stop command and archives the ingress, so a service
+   restart yields a new ingress and a MediaMTX restart rather than an orphan.
+
 ## Test
 
 ```bash
-pytest   # attitude math, drone sim, camera + entity mapping, task handler lifecycle
+pytest   # camera + entity mapping, control/ingress lifecycle, task handler, agent-only guard
 ```
 
 ## Deploy (systemd on the Pi)
@@ -225,22 +257,29 @@ pytest   # attitude math, drone sim, camera + entity mapping, task handler lifec
 sudo cp deploy/systemd/rpi-cam-lattice-service.service /etc/systemd/system/
 sudo cp deploy/systemd/mediamtx-srt.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now rpi-cam-lattice-service   # writes srt_target.env
+sudo systemctl enable --now rpi-cam-lattice-service   # creates the ingress, writes srt_target.env
 sudo systemctl enable --now mediamtx-srt              # loads it, pushes SRT
 journalctl -u rpi-cam-lattice-service -u mediamtx-srt -f
 ```
 
 Edit the `WorkingDirectory`/`ExecStart`/`EnvironmentFile` paths in both units for
-your install location. The Pi Camera can be opened by only one process at a
+your install location. So that Start/Stop tasks can restart and stop MediaMTX
+(a new ingress URL on every Start), let the service user run exactly those two
+commands without a password, then set the task commands in `.env`:
+
+```
+# /etc/sudoers.d/rpi-cam-lattice-service
+airhead ALL=(root) NOPASSWD: /usr/bin/systemctl restart mediamtx-srt, /usr/bin/systemctl stop mediamtx-srt
+``` The Pi Camera can be opened by only one process at a
 time, so stop the sibling `mediamtx` / `mediamtx-mpegts` units before starting
 `mediamtx-srt`. Ports are chosen to coexist (local RTSP relay on `30202`; the
 sibling projects use `30200`/`30201`).
 
 ## Note
 
-- If `VIDEO_ENABLED=false` or the ingress registration fails, for example if endpoint
-  unreachable at startup, the service still publishes the camera entity —
-  without a video reference — and logs a warning.
+- If `VIDEO_ENABLED=false` or the boot-time Start fails, for example if the endpoint
+  is unreachable at startup, the service still publishes the camera entity —
+  sensor `OFF`, no video reference — and logs a warning. A Start task retries.
 - Auth errors over gRPC against a Sandbox, and what they mean:
   - `missing authorization header, bearer-token cookie or anduril-sandbox-authorization`
     — the Sandbox gateway did not get `SANDBOXES_TOKEN`.
