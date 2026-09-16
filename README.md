@@ -267,14 +267,6 @@ your install location. So that Start/Stop tasks can restart and stop MediaMTX
 (a new ingress URL on every Start), let the service user run exactly those two
 commands without a password, then set the task commands in `.env`:
 
-```
-# /etc/sudoers.d/rpi-cam-lattice-service
-airhead ALL=(root) NOPASSWD: /usr/bin/systemctl restart mediamtx-srt, /usr/bin/systemctl stop mediamtx-srt
-``` The Pi Camera can be opened by only one process at a
-time, so stop the sibling `mediamtx` / `mediamtx-mpegts` units before starting
-`mediamtx-srt`. Ports are chosen to coexist (local RTSP relay on `30202`; the
-sibling projects use `30200`/`30201`).
-
 ## Note
 
 - If `VIDEO_ENABLED=false` or the boot-time Start fails, for example if the endpoint
