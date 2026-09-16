@@ -200,39 +200,27 @@ The camera is a **taskable agent**. Two custom task definitions live in
 | `Start` | `type.googleapis.com/anduril.sample_app_rpi_cam.camera.v1alpha.Start` | `CreateIngressStream` (new id), write `SRT_TARGET`, run `TASK_START_COMMAND`; sensor `OPERATIONAL`, `Media` advertises the new video id |
 | `Stop`  | `type.googleapis.com/anduril.sample_app_rpi_cam.camera.v1alpha.Stop`  | run `TASK_STOP_COMMAND`, then `DeleteIngressStream`; sensor `OFF`, `Media` cleared |
 
-**Publish the definitions** to the Lattice Schema Registry once (an operator
-can only assign a task whose type Lattice knows; publishing registers it for
-Sandboxes automatically). See `task-def/README.md`:
-
 ```bash
 export BUF_TOKEN="$(cat ~/workspace/secrets/afard-token-rpi.txt)@schema-registry.developer.anduril.com"
 cd task-def && buf lint && buf build && buf push
 ```
-
-**Ingress lifecycle (`camera/ingress.py`, `camera/control.py`).** Every Stop cleans up the
-Lattice side and every Start rebuilds it, in an order that never leaves
+Every `Stop` cleans up the Lattice side and every `Start` rebuilds it, in an order that never leaves
 MediaMTX pushing at a dead stream or the entity advertising one:
 
-1. **Start**: `CreateIngressStream` under a *fresh* id (a UUID; Lattice allows 4-36 characters),
+1. **Start**: `CreateIngressStream` under a new id ,
    write the returned SRT push URL to `SRT_TARGET_FILE`, then run
-   `TASK_START_COMMAND` (use `systemctl restart`, not `start`, so MediaMTX
-   re-reads the file). If the command fails the new ingress is archived again.
+   `TASK_START_COMMAND`, using `systemctl restart`, so MediaMTX
+   re-reads the file. If the command fails the new ingress is archived again.
 2. **Stop**: run `TASK_STOP_COMMAND` first, then `DeleteIngressStream`. Lattice
    *archives* the record rather than deleting it (it stays retrievable under
    its id), which is why the next Start must not reuse the id. If archiving
    fails the task ends `DONE_NOT_OK`, the sensor already reads `OFF`, and the
    id is kept so a repeated Stop retries it.
-3. **Entity update, as part of the task.** Each transition ends by publishing
-   the asset immediately (`Service.publish_now`): after Start the `Media`
-   items carry the new ingress id; after Stop they are published as an
+3. **Entity updates**: Each transition ends by publishing
+   the asset immediately. After `Start`, the `Media`
+   items carry the new ingress id and after after `Stop` they are published as an
    explicitly empty list, which clears the archived item. The task only
-   reports `DONE_OK` once that publish succeeds; the 1 Hz loop then keeps the
-   same state. (The docs' `OverrideEntity` route is for tools that are *not*
-   the publisher: an override would mask this service's own later publishes.)
-4. **Boot** runs Start best-effort; on failure the entity is published with the
-   sensor `OFF` and no video, and an operator's Start is the retry. **Exit**
-   (SIGTERM) runs the stop command and archives the ingress, so a service
-   restart yields a new ingress and a MediaMTX restart rather than an orphan.
+   reports `DONE_OK` once that publish succeeds.
 
 ## Test
 
@@ -255,18 +243,3 @@ Edit the `WorkingDirectory`/`ExecStart`/`EnvironmentFile` paths in both units fo
 your install location. So that Start/Stop tasks can restart and stop MediaMTX
 (a new ingress URL on every Start), let the service user run exactly those two
 commands without a password, then set the task commands in `.env`:
-
-## Note
-
-- If `VIDEO_ENABLED=false` or the boot-time Start fails, for example if the endpoint
-  is unreachable at startup, the service still publishes the camera entity —
-  sensor `OFF`, no video reference — and logs a warning. A Start task retries.
-- Auth errors over gRPC against a Sandbox, and what they mean:
-  - `missing authorization header, bearer-token cookie or anduril-sandbox-authorization`
-    — the Sandbox gateway did not get `SANDBOXES_TOKEN`.
-  - `request could not be authenticated` — `SANDBOXES_TOKEN` is not a valid Sandboxes token.
-  - `error verifying token: ... error in cryptographic primitive` — the gateway accepted the
-    Sandboxes token but `ENVIRONMENT_TOKEN` was not issued for this environment
-    (regenerate it for the environment named in `LATTICE_ENDPOINT`).
-- Tasks can only be assigned once the `task-def/` schemas are pushed to the Schema
-  Registry, and only to an entity whose catalog advertises the task's type URL.
