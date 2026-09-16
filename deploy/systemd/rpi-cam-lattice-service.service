@@ -1,0 +1,27 @@
+[Unit]
+Description=rpi-cam-lattice-service — publishes the Pi camera as a Lattice entity (gRPC/Connect)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Edit these paths to match your Raspberry Pi deployment.
+WorkingDirectory=/home/airhead/workspace/rpi-cam-lattice-service
+# Runs the console script from the project's virtualenv. --config points at the
+# .env file; alternatively drop the file and use EnvironmentFile= below.
+ExecStart=/home/airhead/workspace/rpi-cam-lattice-service/.venv/bin/rpi-cam-lattice-service --config /home/airhead/workspace/rpi-cam-lattice-service/.env
+# Or inject credentials/config via systemd instead of a .env file:
+# EnvironmentFile=/etc/rpi-cam-lattice-service/env
+
+Restart=always
+RestartSec=5
+
+# Graceful shutdown: the service handles SIGTERM and drains within 30s.
+TimeoutStopSec=35
+
+# Hardening (optional, recommended):
+# NoNewPrivileges=yes
+# ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

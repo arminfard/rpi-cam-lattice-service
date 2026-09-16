@@ -1,0 +1,16 @@
+# Secrets / local config
+.env
+srt_target.env
+
+# MediaMTX (downloaded binary + logs; run scripts/install-mediamtx.sh)
+mediamtx
+mediamtx.log
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/

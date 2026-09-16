@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rpi-cam-lattice-service"
+version = "0.1.0"
+description = "Raspberry Pi camera Lattice integration (gRPC/Connect) — publishes the camera as a Lattice entity alongside a MediaMTX SRT stream"
+requires-python = ">=3.10"
+dependencies = [
+    # The two Buf Schema Registry packages are served from Anduril's index,
+    # not PyPI. Install with requirements.txt (which carries the
+    # --extra-index-url), or configure the index yourself:
+    #   pip install --extra-index-url https://schema-registry.developer.anduril.com/gen/python .
+    "anduril-lattice-sdk-bufbuild-py",
+    "anduril-lattice-sdk-connectrpc-py",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+rpi-cam-lattice-service = "rpi_cam_lattice_service.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
