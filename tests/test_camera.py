@@ -74,3 +74,25 @@ def test_no_video_id_means_no_media():
     req = build_camera_publish_request(cfg, cfg.entity_id, datetime.now(timezone.utc), st, video_id=None)
     assert req.entity.media is None
     assert len(req.to_binary()) > 0
+
+
+def test_task_catalog_and_streaming_state():
+    from anduril.entitymanager.v1.sensors_pub_pb import OperationalState as _OS
+
+    cfg = _config()
+    st = CameraSource(cfg.camera_latitude, cfg.camera_longitude, cfg.camera_altitude_hae_meters).next_state()
+    urls = [
+        "type.googleapis.com/anduril.sample_app_rpi_cam.camera.v1alpha.Start",
+        "type.googleapis.com/anduril.sample_app_rpi_cam.camera.v1alpha.Stop",
+    ]
+    req = build_camera_publish_request(
+        cfg, cfg.entity_id, datetime.now(timezone.utc), st,
+        task_specification_urls=urls, streaming=False,
+    )
+    e = req.entity
+    assert [d.task_specification_url for d in e.task_catalog.task_definitions] == urls
+    assert e.sensors.sensors[0].operational_state == _OS.OFF
+
+    req = build_camera_publish_request(cfg, cfg.entity_id, datetime.now(timezone.utc), st)
+    assert req.entity.task_catalog is None
+    assert req.entity.sensors.sensors[0].operational_state == _OS.OPERATIONAL

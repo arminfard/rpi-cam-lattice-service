@@ -51,6 +51,14 @@ def main() -> int:
             print("video id (media):", entity.media.media[0].item_identifier)
         else:
             print("video id (media): <none advertised>")
+        if entity.sensors is not None and entity.sensors.sensors:
+            print("sensor state:   ", entity.sensors.sensors[0].operational_state.name)
+        if entity.task_catalog is not None and entity.task_catalog.task_definitions:
+            print("task catalog:")
+            for definition in entity.task_catalog.task_definitions:
+                print("   ", definition.task_specification_url)
+        else:
+            print("task catalog:    <none advertised>")
         print("expiry_time:    ", entity.expiry_time.to_datetime().isoformat())
         if not entity.is_live:
             print("WARNING: entity is not live", file=sys.stderr)

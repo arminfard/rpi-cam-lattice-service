@@ -20,6 +20,7 @@ from .config import Config
 from .lattice_client import LatticeClient
 from .logging_setup import get_logger
 from .sources import DroneSimulator, Source, State
+from .tasking import TaskHandler
 from .worker import build_publish_request
 
 logger = get_logger(__name__)
@@ -43,6 +44,7 @@ class Service:
         source: Source | None = None,
         request_builder: RequestBuilder | None = None,
         entity_id: str | None = None,
+        task_handler: TaskHandler | None = None,
     ) -> None:
         self._config = config
         self._client = client
@@ -51,10 +53,13 @@ class Service:
         # A stable id keeps a fixed sensor's identity across restarts; fall back
         # to a random id when none is supplied (the drone-sim behavior).
         self._entity_id = entity_id
+        # Optional Lattice task handler; runs the agent stream on its own thread.
+        self._task_handler = task_handler
 
         self._stop = threading.Event()
         self._reload_requested = threading.Event()
         self._worker_thread: threading.Thread | None = None
+        self._task_thread: threading.Thread | None = None
         self._start_time = 0.0
 
     # -- lifecycle -----------------------------------------------------------
@@ -74,6 +79,17 @@ class Service:
             target=self._worker, name="publisher", daemon=True
         )
         self._worker_thread.start()
+
+        if self._task_handler is not None:
+            # Daemon: the blocking stream read cannot be interrupted, so the
+            # thread is abandoned at exit rather than joined.
+            self._task_thread = threading.Thread(
+                target=self._task_handler.run,
+                args=(self._stop,),
+                name="tasking",
+                daemon=True,
+            )
+            self._task_thread.start()
         logger.info("service started, waiting for signals")
 
         # Main loop: wait for stop, servicing reload requests as they arrive.

@@ -30,6 +30,7 @@ from anduril.entitymanager.v1.sensors_pub_pb import (
 )
 from anduril.entitymanager.v1.types_pub_pb import Template
 from anduril.ontology.v1.type_pub_pb import Disposition, Environment
+from anduril.tasks.v2.catalog_pub_pb import TaskCatalog, TaskDefinition
 from anduril.type.coords_pub_pb import ENU, Quaternion
 
 from .config import Config
@@ -135,6 +136,8 @@ def build_camera_publish_request(
     state: State,
     *,
     video_id: str | None = None,
+    task_specification_urls: list[str] | None = None,
+    streaming: bool = True,
     now: datetime | None = None,
 ) -> PublishEntityRequest:
     """Map a stationary camera ``State`` onto a Lattice ``Entity`` publish request.
@@ -143,6 +146,10 @@ def build_camera_publish_request(
     sensor and its health. When ``video_id`` is provided (the id returned by
     Lattice's VideoManager ``CreateIngressStream``), it is advertised on the
     entity's ``Media`` component so operators can locate the live feed.
+
+    ``task_specification_urls`` are advertised in the entity's ``task_catalog``
+    (an operator can only assign a task the catalog lists). ``streaming`` is the
+    task-driven camera state: a stopped stream reports the sensor as ``OFF``.
     """
     now = now or datetime.now(timezone.utc)
 
@@ -152,6 +159,17 @@ def build_camera_publish_request(
         media = Media(
             media=[MediaItem(item_identifier=video_id, type=MediaType.VIDEO)]
         )
+    task_catalog = None
+    if task_specification_urls:
+        task_catalog = TaskCatalog(
+            task_definitions=[
+                TaskDefinition(task_specification_url=url)
+                for url in task_specification_urls
+            ]
+        )
+    operational_state = (
+        OperationalState.OPERATIONAL if streaming else OperationalState.OFF
+    )
 
     entity = Entity(
         entity_id=entity_id,
@@ -187,11 +205,12 @@ def build_camera_publish_request(
                 Sensor(
                     sensor_id="rpi-cam-0",
                     sensor_type=SensorType.CAMERA,
-                    operational_state=OperationalState.OPERATIONAL,
+                    operational_state=operational_state,
                     sensor_description="Raspberry Pi Camera Module (EO)",
                 )
             ]
         ),
         media=media,
+        task_catalog=task_catalog,
     )
     return PublishEntityRequest(entity=entity)

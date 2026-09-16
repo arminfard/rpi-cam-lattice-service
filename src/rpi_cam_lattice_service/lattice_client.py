@@ -1,11 +1,14 @@
-"""Builds the EntityManager Connect client with TLS and auth wired in.
+"""Builds the EntityManager, VideoManager and TaskManager Connect clients with
+TLS and auth wired in.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from protobuf import Oneof
+from protobuf.wkt import any_pb
 from connectrpc.protocol import ProtocolType
 from pyqwest import SyncClient, SyncHTTPTransport
 
@@ -15,6 +18,29 @@ from anduril.entitymanager.v1.entity_manager_api_pub_connect import (
 from anduril.entitymanager.v1.entity_manager_api_pub_pb import (
     GetEntityRequest,
     PublishEntityRequest,
+)
+from anduril.taskmanager.v1.task_manager_api_pub_connect import (
+    TaskManagerAPIClientSync,
+)
+from anduril.taskmanager.v1.task_manager_api_pub_pb import (
+    CreateTaskRequest,
+    EntityIds,
+    GetTaskRequest,
+    ListenAsAgentRequest,
+    ListenAsAgentResponse,
+    UpdateStatusRequest,
+)
+from anduril.taskmanager.v1.task_pub_pb import (
+    ErrorCode,
+    Principal,
+    Relations,
+    Status,
+    StatusUpdate,
+    System,
+    Task,
+    TaskError,
+    TaskStatus,
+    TaskVersion,
 )
 from anduril.videomanager.v1.create_ingress_stream_request_pub_pb import (
     CreateIngressStreamRequest,
@@ -88,6 +114,11 @@ class LatticeClient:
             http_client=self._http,
             protocol=ProtocolType.GRPC,
         )
+        self._tasks = TaskManagerAPIClientSync(
+            f"https://{config.lattice_endpoint}",
+            http_client=self._http,
+            protocol=ProtocolType.GRPC,
+        )
 
     def publish_entity(
         self, request: PublishEntityRequest, *, timeout_ms: int | None = None
@@ -139,6 +170,106 @@ class LatticeClient:
             push_url=srt.url,
             session_id=srt.session_id,
         )
+
+    # -- tasks ---------------------------------------------------------------
+
+    def listen_as_agent(
+        self, entity_id: str, *, heartbeat_interval_ms: int = 30000
+    ) -> Iterator[ListenAsAgentResponse]:
+        """Open the long-lived agent stream for tasks routed to ``entity_id``.
+
+        No client timeout is applied: the stream is meant to stay open. The
+        server sends a heartbeat every ``heartbeat_interval_ms`` (0 disables
+        heartbeats) so a silent connection can be told apart from a quiet one.
+        """
+        request = ListenAsAgentRequest(
+            agent_selector=Oneof("entity_ids", EntityIds(entity_ids=[entity_id])),
+            heartbeat_interval_ms=heartbeat_interval_ms,
+        )
+        return self._tasks.listen_as_agent(
+            request, headers=self._auth.headers(), timeout_ms=None
+        )
+
+    def update_task_status(
+        self,
+        *,
+        task_id: str,
+        definition_version: int,
+        status_version: int,
+        status: Status,
+        agent_entity_id: str,
+        error_message: str | None = None,
+        error_code: ErrorCode = ErrorCode.FAILED,
+        timeout_ms: int | None = 10000,
+    ) -> TaskVersion:
+        """Report a task status change on behalf of the agent entity.
+
+        ``status_version`` must be strictly greater than the last version
+        Lattice holds for the task, otherwise the update is ignored.
+        """
+        task_status = TaskStatus(status=status)
+        if error_message:
+            task_status.task_error = TaskError(code=error_code, message=error_message)
+        update = StatusUpdate(
+            version=TaskVersion(
+                task_id=task_id,
+                definition_version=definition_version,
+                status_version=status_version,
+            ),
+            status=task_status,
+            author=Principal(agent=Oneof("system", System(entity_id=agent_entity_id))),
+        )
+        response = self._tasks.update_status(
+            UpdateStatusRequest(status_update=update),
+            headers=self._auth.headers(),
+            timeout_ms=timeout_ms,
+        )
+        return response.task.version
+
+    def create_task(
+        self,
+        *,
+        display_name: str,
+        type_url: str,
+        assignee_entity_id: str,
+        author_service_name: str,
+        specification_bytes: bytes = b"",
+        description: str = "",
+        timeout_ms: int | None = 30000,
+    ) -> Task:
+        """Create a task assigned to an agent entity (used by the driver script).
+
+        The specification is a ``google.protobuf.Any`` carrying ``type_url`` and
+        the serialized task message; for the empty Start/Stop messages the
+        payload is empty.
+        """
+        request = CreateTaskRequest(
+            display_name=display_name,
+            description=description,
+            specification=any_pb.Any(type_url=type_url, value=specification_bytes),
+            author=Principal(
+                agent=Oneof("system", System(service_name=author_service_name))
+            ),
+            relations=Relations(
+                assignee=Principal(
+                    agent=Oneof("system", System(entity_id=assignee_entity_id))
+                )
+            ),
+            is_executed_elsewhere=False,
+        )
+        response = self._tasks.create_task(
+            request, headers=self._auth.headers(), timeout_ms=timeout_ms
+        )
+        return response.task
+
+    def get_task(self, task_id: str, *, timeout_ms: int | None = 30000) -> Task:
+        """Read a task back (used by the driver script)."""
+        response = self._tasks.get_task(
+            GetTaskRequest(task_id=task_id),
+            headers=self._auth.headers(),
+            timeout_ms=timeout_ms,
+        )
+        return response.task
 
     def close(self) -> None:
         # Close the pyqwest client.

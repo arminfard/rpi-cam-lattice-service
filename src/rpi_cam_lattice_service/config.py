@@ -79,6 +79,20 @@ class Config:
     # (SRT_TARGET=<url>) that the MediaMTX systemd unit loads.
     srt_target_file: str = "./srt_target.env"
 
+    # --- Tasking (Lattice Tasks API) ---
+    # When enabled, the entity advertises a task_catalog and the service listens
+    # for tasks routed to it (ListenAsAgent), executing Start/Stop.
+    tasking_enabled: bool = True
+    # Protobuf package of the custom task definitions pushed to the Lattice
+    # Schema Registry (see task-def/). Type URLs are
+    # type.googleapis.com/<package>.Start and .Stop.
+    task_package: str = "anduril.sample_app_rpi_cam.camera.v1alpha"
+    # Shell commands run to start/stop the video stream (empty = state only).
+    task_start_command: str = ""
+    task_stop_command: str = ""
+    # Heartbeat interval requested on the agent stream (0 disables heartbeats).
+    task_heartbeat_interval_ms: int = 30000
+
     # Fields not sourced from the environment.
     _config_path: str = field(default="", repr=False)
 
@@ -105,6 +119,8 @@ class Config:
             raise ConfigError(
                 f"LATTICE_CA_CERT_PATH does not exist: {self.ca_cert_path}"
             )
+        if self.tasking_enabled and not self.task_package:
+            raise ConfigError("TASK_PACKAGE is required when TASKING_ENABLED=true")
 
 
 def load(path: str = ".env") -> Config:
@@ -141,6 +157,11 @@ def load(path: str = ".env") -> Config:
         video_title=get("VIDEO_TITLE").strip(),
         srt_passphrase=get("SRT_PASSPHRASE").strip(),
         srt_target_file=(get("SRT_TARGET_FILE").strip() or "./srt_target.env"),
+        tasking_enabled=_truthy(get("TASKING_ENABLED") or "true"),
+        task_package=(get("TASK_PACKAGE").strip() or "anduril.sample_app_rpi_cam.camera.v1alpha"),
+        task_start_command=get("TASK_START_COMMAND").strip(),
+        task_stop_command=get("TASK_STOP_COMMAND").strip(),
+        task_heartbeat_interval_ms=int(_float(get("TASK_HEARTBEAT_INTERVAL_MS"), 30000)),
         _config_path=path,
     )
     return cfg

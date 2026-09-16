@@ -12,10 +12,12 @@ import os
 
 from . import config as config_module
 from .config import Config, ConfigError
+from .control import CameraControl
 from .lattice_client import LatticeClient, SrtIngressInfo
 from .logging_setup import configure, get_logger
 from .service import Service
 from .sources import CameraSource
+from .tasking import TaskHandler
 from .worker import build_camera_publish_request
 
 
@@ -109,9 +111,35 @@ def main(argv: list[str] | None = None) -> int:
             altitude_hae_meters=config.camera_altitude_hae_meters,
         )
 
+        # Task-driven camera state. The publish loop reads it every tick so the
+        # entity reflects Start/Stop; the task handler writes it.
+        control = CameraControl(
+            start_command=config.task_start_command,
+            stop_command=config.task_stop_command,
+            streaming=True,
+        )
+        task_handler = None
+        if config.tasking_enabled:
+            task_handler = TaskHandler(
+                client,
+                agent_entity_id=config.entity_id,
+                task_package=config.task_package,
+                control=control,
+                heartbeat_interval_ms=config.task_heartbeat_interval_ms,
+            )
+        else:
+            logger.info("tasking disabled (TASKING_ENABLED=false)")
+        catalog_urls = task_handler.task_specification_urls if task_handler else None
+
         def request_builder(entity_id, created_time, state):
             return build_camera_publish_request(
-                config, entity_id, created_time, state, video_id=video_id
+                config,
+                entity_id,
+                created_time,
+                state,
+                video_id=video_id,
+                task_specification_urls=catalog_urls,
+                streaming=control.streaming,
             )
 
         service = Service(
@@ -120,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
             source=source,
             request_builder=request_builder,
             entity_id=config.entity_id,
+            task_handler=task_handler,
         )
         return service.run()
     finally:
