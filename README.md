@@ -321,6 +321,23 @@ different unit name.
 | `HEALTH_TEMP_FAIL_C` | SoC temperature at which `soc-thermal` reports `FAIL` (default `85.0`). |
 
 See `.env.example` for the defaults and the comments on every key.
+## Tasking
+
+The camera is a **taskable agent**. Two custom task definitions live in
+`task-def/` as empty Protobuf messages, identified purely by name:
+
+| Task | Type URL | Effect |
+|---|---|---|
+| `Start` | `type.googleapis.com/anduril.sample_app_rpi_cam.camera.v1alpha.Start` | `CreateIngressStream` (new id), write `SRT_TARGET`, run `TASK_START_COMMAND`; sensor `OPERATIONAL`, `Media` advertises the new video id |
+| `Stop`  | `type.googleapis.com/anduril.sample_app_rpi_cam.camera.v1alpha.Stop`  | run `TASK_STOP_COMMAND`, then `DeleteIngressStream`; sensor `OFF`, `Media` cleared |
+
+Push the definitions to the Lattice Schema Registry once (details in
+`task-def/README.md`):
+
+```bash
+export BUF_TOKEN=<token>@schema-registry.developer.anduril.com
+cd task-def && buf lint && buf build && buf push
+```
 
 ## Run
 
@@ -360,57 +377,6 @@ python scripts/send_task.py --config .env Start   # sensor state back to OPERATI
 ```
 
 `send_task.py` accepts `--entity-id` and `--wait <seconds>` (default 20).
-
-## Tasking
-
-The camera is a **taskable agent**. Two custom task definitions live in
-`task-def/` as empty Protobuf messages, identified purely by name:
-
-| Task | Type URL | Effect |
-|---|---|---|
-| `Start` | `type.googleapis.com/anduril.sample_app_rpi_cam.camera.v1alpha.Start` | `CreateIngressStream` (new id), write `SRT_TARGET`, run `TASK_START_COMMAND`; sensor `OPERATIONAL`, `Media` advertises the new video id |
-| `Stop`  | `type.googleapis.com/anduril.sample_app_rpi_cam.camera.v1alpha.Stop`  | run `TASK_STOP_COMMAND`, then `DeleteIngressStream`; sensor `OFF`, `Media` cleared |
-
-Push the definitions to the Lattice Schema Registry once (details in
-`task-def/README.md`):
-
-```bash
-export BUF_TOKEN=<token>@schema-registry.developer.anduril.com
-cd task-def && buf lint && buf build && buf push
-```
-
-Every `Stop` cleans up the Lattice side and every `Start` rebuilds it, in an
-order that never leaves MediaMTX pushing at a dead stream or the entity
-advertising one:
-
-1. **Start**: `CreateIngressStream` under a new client id (Lattice returns a
-   server-shaped `<client id>#<suffix>`, which is what gets advertised and
-   archived), persist the record in `state.json`, write the SRT push URL to
-   `SRT_TARGET_FILE`, then run `TASK_START_COMMAND` (`systemctl restart`, so
-   MediaMTX re-reads the file). If the command fails the ingress is archived.
-2. **Stop**: run `TASK_STOP_COMMAND` first, then `DeleteIngressStream`. Lattice
-   *archives* the record rather than deleting it (it stays retrievable under
-   its id), which is why the next Start must not reuse the id. If archiving
-   fails the task ends `DONE_NOT_OK`, the sensor already reads `OFF`, and the
-   id is kept so a repeated Stop retries it. The next `Start` archives that
-   leftover first (it may already be dead server-side) and only then
-   registers a fresh ingress; a `Start` repeated while the stream is already
-   on reuses the live ingress.
-3. **Entity updates**: each transition ends by publishing the asset at once
-   (`Service.publish_now`). After `Start` the `Media` items carry the new id;
-   after `Stop` they are an explicitly empty list, which clears the archived
-   item. The task only reports `DONE_OK` once that publish succeeds.
-
-The agent stream reconnects with exponential backoff and jitter (1 s doubling
-to a 30 s cap). Every status update carries a strictly increasing
-`status_version`: the counter starts from the delivered version, adopts the
-version Lattice returns after each update, and is re-read with `GetTask` when
-a cancel or complete request arrives, since those bump the version server-side
-but carry only the task id. Start and Stop are not interruptible, so a cancel
-that lands mid-action is honoured afterwards: the task ends `DONE_NOT_OK` with
-`CANCELLED` even though the action completed. A complete request marks the
-task terminal locally and nothing more is sent. Once shutdown has begun, any
-queued Start or Stop fails with `DONE_NOT_OK` instead of undoing the cleanup.
 
 ## Test and lint
 
