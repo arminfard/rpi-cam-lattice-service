@@ -82,7 +82,7 @@ The daemon runs unprivileged and may run exactly two commands through sudo:
 enable `mediamtx-srt`; it has no `[Install]` section on purpose, because only
 the daemon knows when a valid `srt_target.env` exists.
 
-## Upgrading
+## Upgrade
 
 On a Pi that already runs the integration, pull the new version and:
 
@@ -105,7 +105,7 @@ sudo chown "$USER:$USER" srt_target.env      # root-owned file from the old run
 sudo systemctl disable --now mediamtx-srt    # the daemon starts it from now on
 ```
 
-## Adding a component
+## Add a new component
 
 Health is the worked example. Each step lives in `health/`:
 
