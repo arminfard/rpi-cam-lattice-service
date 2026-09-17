@@ -55,6 +55,11 @@ def main() -> int:
         print("entity_id:      ", entity.entity_id)
         print("is_live:        ", entity.is_live)
         print("aliases.name:   ", entity.aliases.name)
+        alternate_ids = entity.aliases.alternate_ids if entity.aliases is not None else []
+        for alt in alternate_ids or []:
+            print("alternate id:   ", f"{alt.type.name}={alt.id}")
+        if entity.mil_view is not None and entity.mil_view.nationality is not None:
+            print("nationality:    ", entity.mil_view.nationality.name)
         pos = entity.location.position
         print(
             "position:       ",

@@ -348,3 +348,24 @@ def test_health_thresholds_validated_even_when_disabled():
     cfg.health_temp_fail_c = cfg.health_temp_warn_c
     with pytest.raises(ConfigError, match="HEALTH_TEMP_FAIL_C"):
         cfg.validate()
+
+
+def test_identity_keys_load_with_defaults(tmp_path, monkeypatch):
+    for key in ("NATIONALITY", "ALTERNATE_ID", "ALTERNATE_ID_TYPE"):
+        monkeypatch.delenv(key, raising=False)
+    (tmp_path / ".env").write_text("LATTICE_ENDPOINT=example.test\nENVIRONMENT_TOKEN=tok\n")
+    cfg = load(str(tmp_path / ".env"))
+    assert cfg.nationality == "UNITED_STATES_OF_AMERICA"
+    assert cfg.alternate_id == ""
+    assert cfg.alternate_id_type == "SERIAL_NUMBER"
+
+    (tmp_path / ".env").write_text(
+        "LATTICE_ENDPOINT=example.test\nENVIRONMENT_TOKEN=tok\n"
+        "NATIONALITY=GERMANY\nALTERNATE_ID=cam-7\nALTERNATE_ID_TYPE=REGISTRATION_ID\n"
+    )
+    cfg = load(str(tmp_path / ".env"))
+    assert (cfg.nationality, cfg.alternate_id, cfg.alternate_id_type) == (
+        "GERMANY",
+        "cam-7",
+        "REGISTRATION_ID",
+    )

@@ -27,7 +27,7 @@ from . import config as config_module
 from .camera.control import CameraControl
 from .camera.ingress import VideoIngress
 from .camera.pipeline import CommandPipeline, MediaMtxStatusProbe
-from .camera.source import CameraSource
+from .camera.source import CameraSource, pi_serial_number
 from .config import Config, ConfigError
 from .entity import (
     CameraObservation,
@@ -38,6 +38,7 @@ from .entity import (
     SensorsContributor,
     TaskCatalogContributor,
 )
+from .entity.base import validate_identity
 from .health import (
     HealthContributor,
     HealthSampler,
@@ -213,9 +214,18 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = config_module.load(args.config)
         config.validate()
+        validate_identity(config)
     except ConfigError as exc:
         logger.error("invalid configuration", error=str(exc))
         return 2
+    if not config.alternate_id:
+        # No alias configured: fall back to the board's hardware serial, which
+        # is stable and unique, so other systems can correlate the asset.
+        config.alternate_id = pi_serial_number() or ""
+        if config.alternate_id:
+            logger.info("using the Pi serial as the alternate id", alternate_id=config.alternate_id)
+        else:
+            logger.info("no alternate id available; alias omitted")
 
     try:
         client = LatticeClient(config)

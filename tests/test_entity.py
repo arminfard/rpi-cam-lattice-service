@@ -344,3 +344,67 @@ def test_location_reads_source_each_build():
         2.0,
         3.0,
     )
+
+
+# --- nationality and alternate id --------------------------------------------
+
+
+def test_nationality_is_published_from_config():
+    from anduril.ontology.v1.type_pub_pb import Nationality
+
+    e = base_entity(_config(), entity_id="x", created_time=CREATED, now=NOW)
+    assert e.mil_view.nationality == Nationality.UNITED_STATES_OF_AMERICA
+
+    cfg = _config()
+    cfg.nationality = "united kingdom"  # case and separators are forgiven
+    e = base_entity(cfg, entity_id="x", created_time=CREATED, now=NOW)
+    assert e.mil_view.nationality == Nationality.UNITED_KINGDOM
+
+
+def test_alternate_id_is_published_when_configured():
+    from anduril.entitymanager.v1.types_pub_pb import AltIdType
+
+    cfg = _config()
+    cfg.alternate_id = "10000000abcd1234"
+    e = base_entity(cfg, entity_id="x", created_time=CREATED, now=NOW)
+    assert [(a.type, a.id) for a in e.aliases.alternate_ids] == [
+        (AltIdType.SERIAL_NUMBER, "10000000abcd1234")
+    ]
+    assert e.aliases.name == "Front Gate Camera"
+
+    cfg.alternate_id_type = "registration-id"
+    e = base_entity(cfg, entity_id="x", created_time=CREATED, now=NOW)
+    assert e.aliases.alternate_ids[0].type == AltIdType.REGISTRATION_ID
+
+
+def test_alternate_id_is_omitted_when_empty():
+    e = base_entity(_config(), entity_id="x", created_time=CREATED, now=NOW)
+    assert not e.aliases.alternate_ids
+
+
+def test_identity_enums_are_validated_at_startup():
+    from rpi_cam_lattice_service.config import ConfigError
+    from rpi_cam_lattice_service.entity import validate_identity
+
+    cfg = _config()
+    validate_identity(cfg)
+    for field, value in (("nationality", "Narnia"), ("nationality", "INVALID")):
+        bad = _config()
+        setattr(bad, field, value)
+        with pytest.raises(ConfigError, match="NATIONALITY must be one of"):
+            validate_identity(bad)
+    bad = _config()
+    bad.alternate_id_type = "PLATE"
+    with pytest.raises(ConfigError, match="ALTERNATE_ID_TYPE must be one of"):
+        validate_identity(bad)
+
+
+def test_pi_serial_number_reads_cpuinfo(tmp_path):
+    from rpi_cam_lattice_service.camera.source import pi_serial_number
+
+    cpuinfo = tmp_path / "cpuinfo"
+    cpuinfo.write_text("processor\t: 0\nModel\t\t: Raspberry Pi 5\nSerial\t\t: 10000000deadbeef\n")
+    assert pi_serial_number(str(cpuinfo)) == "10000000deadbeef"
+    cpuinfo.write_text("processor\t: 0\n")
+    assert pi_serial_number(str(cpuinfo)) is None
+    assert pi_serial_number(str(tmp_path / "missing")) is None

@@ -92,6 +92,14 @@ class Config:
     entity_name: str = "RPi Camera"
     platform_type: str = "Camera"
     integration_name: str = "rpi-cam-lattice-service"
+    # mil_view.nationality, as an SDK ``Nationality`` member name (for example
+    # UNITED_STATES_OF_AMERICA, UNITED_KINGDOM, GERMANY). Validated at startup.
+    nationality: str = "UNITED_STATES_OF_AMERICA"
+    # One aliases.alternate_ids entry so other systems can correlate the asset.
+    # Empty id = use the Pi's hardware serial from /proc/cpuinfo. The type is an
+    # SDK ``AltIdType`` member name (SERIAL_NUMBER, REGISTRATION_ID, CALLSIGN...).
+    alternate_id: str = ""
+    alternate_id_type: str = "SERIAL_NUMBER"
     # The camera's fixed location (it doesn't move). Defaults are demo coords —
     # set real values for your deployment.
     camera_latitude: float = 49.65108
@@ -240,6 +248,9 @@ def load(path: str = ".env") -> Config:
         entity_name=text("ENTITY_NAME", defaults.entity_name),
         platform_type=text("PLATFORM_TYPE", defaults.platform_type),
         integration_name=text("INTEGRATION_NAME", defaults.integration_name),
+        nationality=text("NATIONALITY", defaults.nationality),
+        alternate_id=text("ALTERNATE_ID", defaults.alternate_id),
+        alternate_id_type=text("ALTERNATE_ID_TYPE", defaults.alternate_id_type),
         camera_latitude=_parse_float(
             "CAMERA_LATITUDE", get("CAMERA_LATITUDE"), defaults.camera_latitude
         ),

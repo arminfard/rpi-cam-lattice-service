@@ -1,6 +1,12 @@
 """Entity composition: identity floor + contributors -> ``PublishEntityRequest``."""
 
-from .base import ENTITY_DESCRIPTION, ENTITY_EXPIRY_SECONDS, base_entity, sidc_for
+from .base import (
+    ENTITY_DESCRIPTION,
+    ENTITY_EXPIRY_SECONDS,
+    base_entity,
+    sidc_for,
+    validate_identity,
+)
 from .builder import EntityBuilder
 from .contributors import (
     BuildContext,
@@ -25,4 +31,5 @@ __all__ = [
     "TaskCatalogContributor",
     "base_entity",
     "sidc_for",
+    "validate_identity",
 ]

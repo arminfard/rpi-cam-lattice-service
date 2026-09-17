@@ -39,3 +39,26 @@ class CameraSource:
             longitude_degrees=self._longitude,
             altitude_hae_meters=self._altitude_hae,
         )
+
+
+PI_CPUINFO_PATH = "/proc/cpuinfo"
+
+
+def pi_serial_number(path: str = PI_CPUINFO_PATH) -> str | None:
+    """The Raspberry Pi's hardware serial from ``/proc/cpuinfo``, or ``None``.
+
+    Used as the entity's alternate id when none is configured: it is stable
+    across reinstalls and unique per board, so other systems can correlate
+    the asset with the physical unit. Off a Pi (no ``Serial`` line, or no
+    such file) there is nothing to report and the alias is simply omitted.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                key, sep, value = line.partition(":")
+                if sep and key.strip() == "Serial":
+                    serial = value.strip()
+                    return serial or None
+    except OSError:
+        return None
+    return None
