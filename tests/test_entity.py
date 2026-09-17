@@ -21,11 +21,11 @@ from rpi_cam_lattice_service.entity import (
     LocationContributor,
     MediaContributor,
     SensorsContributor,
-    StaticHealthContributor,
     TaskCatalogContributor,
     base_entity,
     sidc_for,
 )
+from rpi_cam_lattice_service.health import HealthContributor
 
 NOW = datetime(2026, 9, 16, 12, 0, 0, tzinfo=UTC)
 CREATED = NOW - timedelta(hours=1)
@@ -57,6 +57,7 @@ def _builder(
     *,
     desired_on: bool = True,
     ready: bool | None = None,
+    degraded: bool = False,
     video_id: str | None = None,
     urls: list[str] | None = None,
 ) -> EntityBuilder:
@@ -66,10 +67,14 @@ def _builder(
         created_time=CREATED,
         contributors=[
             LocationContributor(_source(cfg)),
-            SensorsContributor(lambda: CameraObservation(desired_on=desired_on, ready=ready)),
+            SensorsContributor(
+                lambda: CameraObservation(desired_on=desired_on, ready=ready, degraded=degraded)
+            ),
             MediaContributor(lambda: video_id),
             TaskCatalogContributor(urls or []),
-            StaticHealthContributor(),
+            # The real contributor with no snapshot: health present, NOT_READY.
+            # Its full mapping is covered in test_health.py.
+            HealthContributor(lambda: None),
         ],
     )
 
@@ -144,7 +149,7 @@ def test_builder_produces_full_entity():
     assert e.media.media[0].type == MediaType.VIDEO
     assert [d.task_specification_url for d in e.task_catalog.task_definitions] == URLS
     assert e.health.connection_status == ConnectionStatus.ONLINE
-    assert e.health.health_status == HealthStatus.HEALTHY
+    assert e.health.health_status == HealthStatus.NOT_READY
     assert e.health.update_time.to_datetime() == NOW
     assert len(req.to_binary()) > 0
 
@@ -222,6 +227,30 @@ def test_sensor_operational_state(desired_on, ready, offline, expected):
     assert req.entity.sensors.sensors[0].operational_state == expected
 
 
+@pytest.mark.parametrize(
+    ("desired_on", "ready", "offline", "expected"),
+    [
+        # Frames flowing (or readiness unknown) on a throttled platform: DEGRADED.
+        (True, True, False, OperationalState.DEGRADED),
+        (True, None, False, OperationalState.DEGRADED),
+        # Not ready beats degraded: nothing is flowing at all.
+        (True, False, False, OperationalState.NON_OPERATIONAL),
+        # Off is off, whatever the platform is doing.
+        (False, True, False, OperationalState.OFF),
+        (True, True, True, OperationalState.OFF),
+    ],
+)
+def test_sensor_degraded_rule(desired_on, ready, offline, expected):
+    req = _builder(_config(), desired_on=desired_on, ready=ready, degraded=True).build(
+        now=NOW, offline=offline
+    )
+    assert req.entity.sensors.sensors[0].operational_state == expected
+
+
+def test_observation_defaults_to_not_degraded():
+    assert CameraObservation(desired_on=True, ready=True).degraded is False
+
+
 def test_sensor_id_and_description_are_configurable():
     e = base_entity(_config(), entity_id="x", created_time=CREATED, now=NOW)
     SensorsContributor(
@@ -285,7 +314,6 @@ def test_health_online_by_default_and_offline_on_shutdown():
     b = _builder(_config())
     online = b.build(now=NOW).entity.health
     assert online.connection_status == ConnectionStatus.ONLINE
-    assert online.health_status == HealthStatus.HEALTHY
     offline = b.build(now=NOW, offline=True).entity.health
     assert offline.connection_status == ConnectionStatus.OFFLINE
     assert offline.update_time.to_datetime() == NOW

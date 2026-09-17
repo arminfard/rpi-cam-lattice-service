@@ -29,7 +29,7 @@ cat <<MSG
 Installed into $VENV
 
 Next steps:
-  1. cp .env.example .env            # then fill in LATTICE_URL, the token, camera position...
+  1. cp .env.example .env            # then fill in LATTICE_ENDPOINT, the token, camera position...
   2. ./scripts/install-mediamtx.sh    # downloads the MediaMTX binary into the repo (on the Pi)
   3. Edit the placeholders (project path, User=/Group=, account name) in
        deploy/systemd/rpi-cam-lattice-service.service

@@ -16,8 +16,9 @@ Both messages are empty; the agent dispatches on the type URL alone.
 # 1) Create the repository once in the LSR dashboard
 #    (https://schema-registry.developer.anduril.com): owner `anduril`, name `sample-app-rpi-cam`,
 #    private. If you use an organization instead, see buf.yaml.
-# 2) Authenticate (a token created under Settings in the dashboard).
-export BUF_TOKEN="$(cat ~/workspace/secrets/afard-token-rpi.txt)@schema-registry.developer.anduril.com"
+# 2) Authenticate with a token created under Settings in the dashboard
+#    (keep it out of the repo and shell history).
+export BUF_TOKEN=<token>@schema-registry.developer.anduril.com
 buf registry whoami schema-registry.developer.anduril.com
 # 3) Validate and push from this directory.
 cd task-def

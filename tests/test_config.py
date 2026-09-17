@@ -31,6 +31,10 @@ _KEYS = [
     "TASK_START_COMMAND",
     "TASK_STOP_COMMAND",
     "TASK_HEARTBEAT_INTERVAL_MS",
+    "HEALTH_ENABLED",
+    "HEALTH_SAMPLE_INTERVAL_SECONDS",
+    "HEALTH_TEMP_WARN_C",
+    "HEALTH_TEMP_FAIL_C",
 ]
 
 
@@ -67,6 +71,10 @@ def test_defaults_when_nothing_is_set(tmp_path):
     assert cfg.state_file == "./state.json"
     assert cfg.mediamtx_api_url == "http://127.0.0.1:9997"
     assert cfg.mediamtx_path == "cam"
+    assert cfg.health_enabled is True
+    assert cfg.health_sample_interval_seconds == 5.0
+    assert cfg.health_temp_warn_c == 75.0
+    assert cfg.health_temp_fail_c == 85.0
     assert cfg._config_path == str(tmp_path / "missing.env")
 
 
@@ -83,6 +91,10 @@ def test_file_values_are_loaded(tmp_path):
         STATE_FILE="/var/lib/cam/state.json",
         MEDIAMTX_API_URL="http://localhost:9998",
         MEDIAMTX_PATH="front",
+        HEALTH_ENABLED="false",
+        HEALTH_SAMPLE_INTERVAL_SECONDS="2.5",
+        HEALTH_TEMP_WARN_C="70",
+        HEALTH_TEMP_FAIL_C="80.5",
     )
     cfg = load(path)
     assert cfg.lattice_endpoint == "env.example.test"
@@ -94,6 +106,10 @@ def test_file_values_are_loaded(tmp_path):
     assert cfg.state_file == "/var/lib/cam/state.json"
     assert cfg.mediamtx_api_url == "http://localhost:9998"
     assert cfg.mediamtx_path == "front"
+    assert cfg.health_enabled is False
+    assert cfg.health_sample_interval_seconds == 2.5
+    assert cfg.health_temp_warn_c == 70.0
+    assert cfg.health_temp_fail_c == 80.5
 
 
 def test_environment_overrides_file(tmp_path, monkeypatch):
@@ -126,7 +142,15 @@ def test_values_are_stripped(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "key", ["CAMERA_LATITUDE", "CAMERA_LONGITUDE", "CAMERA_ALTITUDE_HAE_METERS"]
+    "key",
+    [
+        "CAMERA_LATITUDE",
+        "CAMERA_LONGITUDE",
+        "CAMERA_ALTITUDE_HAE_METERS",
+        "HEALTH_SAMPLE_INTERVAL_SECONDS",
+        "HEALTH_TEMP_WARN_C",
+        "HEALTH_TEMP_FAIL_C",
+    ],
 )
 def test_bad_float_names_the_key(tmp_path, monkeypatch, key):
     monkeypatch.setenv(key, "abc")
@@ -143,7 +167,7 @@ def test_bad_int_names_the_key(tmp_path, monkeypatch, value):
         load(str(tmp_path / ".env"))
 
 
-@pytest.mark.parametrize("key", ["VIDEO_ENABLED", "TASKING_ENABLED"])
+@pytest.mark.parametrize("key", ["VIDEO_ENABLED", "TASKING_ENABLED", "HEALTH_ENABLED"])
 @pytest.mark.parametrize("value", ["maybe", "2", "y", "enabled"])
 def test_bad_bool_names_the_key(tmp_path, monkeypatch, key, value):
     monkeypatch.setenv(key, value)
@@ -272,3 +296,41 @@ def test_task_package_required_when_tasking_enabled():
         cfg.validate()
     cfg.tasking_enabled = False
     cfg.validate()
+
+
+@pytest.mark.parametrize("interval", [0.0, 0.25, 0.4999, -1.0, float("nan")])
+def test_health_sample_interval_minimum(interval):
+    cfg = _valid()
+    cfg.health_sample_interval_seconds = interval
+    with pytest.raises(ConfigError, match="HEALTH_SAMPLE_INTERVAL_SECONDS"):
+        cfg.validate()
+    cfg.health_sample_interval_seconds = 0.5
+    cfg.validate()
+
+
+@pytest.mark.parametrize(("warn", "fail"), [(85.0, 85.0), (90.0, 85.0), (75.0, 74.9)])
+def test_health_temp_warn_must_be_below_fail(warn, fail):
+    cfg = _valid()
+    cfg.health_temp_warn_c, cfg.health_temp_fail_c = warn, fail
+    with pytest.raises(ConfigError, match="HEALTH_TEMP_FAIL_C"):
+        cfg.validate()
+    cfg.health_temp_warn_c, cfg.health_temp_fail_c = 70.0, 80.0
+    cfg.validate()
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+def test_health_temp_thresholds_must_be_finite(value):
+    cfg = _valid()
+    cfg.health_temp_warn_c = value
+    with pytest.raises(ConfigError, match="HEALTH_TEMP"):
+        cfg.validate()
+
+
+def test_health_thresholds_validated_even_when_disabled():
+    # A bad threshold is a config error regardless of HEALTH_ENABLED, so that
+    # turning health on later never fails at that moment.
+    cfg = _valid()
+    cfg.health_enabled = False
+    cfg.health_temp_fail_c = cfg.health_temp_warn_c
+    with pytest.raises(ConfigError, match="HEALTH_TEMP_FAIL_C"):
+        cfg.validate()

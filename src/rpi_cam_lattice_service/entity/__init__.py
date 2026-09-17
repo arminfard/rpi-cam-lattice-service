@@ -9,7 +9,6 @@ from .contributors import (
     LocationContributor,
     MediaContributor,
     SensorsContributor,
-    StaticHealthContributor,
     TaskCatalogContributor,
 )
 
@@ -23,7 +22,6 @@ __all__ = [
     "LocationContributor",
     "MediaContributor",
     "SensorsContributor",
-    "StaticHealthContributor",
     "TaskCatalogContributor",
     "base_entity",
     "sidc_for",

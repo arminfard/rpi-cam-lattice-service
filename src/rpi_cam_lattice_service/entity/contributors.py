@@ -1,10 +1,10 @@
 """Entity contributors: each one fills a single component of the entity.
 
 The entity published to Lattice is composed from independent parts (location,
-sensors, media, task catalog, health, ...). Rather than threading every part
-through one ever-growing function signature, each part is an
-``EntityContributor`` whose ``apply`` sets its component on the ``Entity``
-under construction. ``EntityBuilder`` runs them in order after laying down
+sensors, media, task catalog, and health from the ``health`` package). Rather
+than threading every part through one ever-growing function signature, each
+part is an ``EntityContributor`` whose ``apply`` sets its component on the
+``Entity`` under construction. ``EntityBuilder`` runs them in order after laying down
 the identity floor from ``base.py``.
 
 Contributors depend only on plain callables and small dataclasses, never on
@@ -21,11 +21,6 @@ from datetime import datetime
 from typing import Protocol
 
 from anduril.entitymanager.v1.entity_pub_pb import Entity
-from anduril.entitymanager.v1.health_status_pub_pb import (
-    ConnectionStatus,
-    Health,
-    HealthStatus,
-)
 from anduril.entitymanager.v1.location_pub_pb import Location, Position
 from anduril.entitymanager.v1.media_pub_pb import Media, MediaItem, MediaType
 from anduril.entitymanager.v1.sensors_pub_pb import (
@@ -35,7 +30,7 @@ from anduril.entitymanager.v1.sensors_pub_pb import (
     SensorType,
 )
 from anduril.tasks.v2.catalog_pub_pb import TaskCatalog, TaskDefinition
-from protobuf.wkt import timestamp_pb, wrappers_pb
+from protobuf.wkt import wrappers_pb
 
 from ..camera.source import CameraSource
 
@@ -65,15 +60,14 @@ class CameraObservation:
 
     ``desired_on`` is the operator's intent (Start/Stop tasks); ``ready`` is
     whether the media pipeline is observed to be producing frames, or ``None``
-    when no probe is available.
+    when no probe is available; ``degraded`` says the platform is compromised
+    (thermally throttled or under-powered, per the health snapshot) so the
+    picture may suffer even though frames are flowing.
     """
 
     desired_on: bool
     ready: bool | None
-
-
-def _timestamp(dt: datetime) -> timestamp_pb.Timestamp:
-    return timestamp_pb.Timestamp.from_datetime(dt)
+    degraded: bool = False
 
 
 class LocationContributor:
@@ -96,10 +90,11 @@ class LocationContributor:
 class SensorsContributor:
     """Sets the single EO camera ``Sensor`` with its operational state.
 
-    State rule: offline or not desired on -> OFF; desired on and observed
-    ready (or readiness unknown) -> OPERATIONAL; desired on but observed not
-    ready -> NON_OPERATIONAL. Unknown readiness is optimistic because the
-    probe is optional and its absence should not mark a working camera down.
+    State rule: offline or not desired on -> OFF; desired on but observed not
+    ready -> NON_OPERATIONAL; desired on and ready (or readiness unknown) but
+    the platform degraded -> DEGRADED; otherwise OPERATIONAL. Unknown
+    readiness is optimistic because the probe is optional and its absence
+    should not mark a working camera down.
     """
 
     def __init__(
@@ -132,6 +127,8 @@ class SensorsContributor:
             return OperationalState.OFF
         if obs.ready is False:
             return OperationalState.NON_OPERATIONAL
+        if obs.degraded:
+            return OperationalState.DEGRADED
         return OperationalState.OPERATIONAL
 
 
@@ -168,23 +165,4 @@ class TaskCatalogContributor:
             return
         entity.task_catalog = TaskCatalog(
             task_definitions=[TaskDefinition(task_specification_url=url) for url in self._urls]
-        )
-
-
-class StaticHealthContributor:
-    """Placeholder health: ONLINE/HEALTHY, or OFFLINE on the shutdown publish.
-
-    This reports nothing observed about the device. It exists so the entity
-    carries a ``Health`` component from day one; wave 2 replaces it with a
-    ``HealthContributor`` fed by real telemetry (thermal, power, pipeline,
-    tasking stream) sampled on a background worker.
-    """
-
-    def apply(self, entity: Entity, ctx: BuildContext) -> None:
-        entity.health = Health(
-            connection_status=(
-                ConnectionStatus.OFFLINE if ctx.offline else ConnectionStatus.ONLINE
-            ),
-            health_status=HealthStatus.HEALTHY,
-            update_time=_timestamp(ctx.now),
         )

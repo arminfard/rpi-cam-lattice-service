@@ -8,13 +8,19 @@ and acts as a Lattice agent executing ``Start`` / ``Stop`` tasks.
 Subpackages:
 
 * ``lattice``  — TLS transport, auth metadata, one thin client per Lattice API.
-* ``camera``   — the camera's state, the entity built from it, the task-driven
-                 stream control, and the video ingress lifecycle.
+* ``entity``   — the composition seam: a base entity plus one contributor per
+                 component (location, sensors, media, task catalog, health).
+* ``camera``   — the camera's position, the media pipeline and its status
+                 probe, the task-driven Start/Stop control, and the video
+                 ingress lifecycle.
 * ``tasking``  — the task definitions the camera advertises and the agent
                  handler that executes them.
+* ``health``   — probes sampled on their own cadence, rolled up into the
+                 entity's ``Health`` component.
 
-Root modules: ``config`` (.env), ``logging_setup`` (JSON logs), ``service``
-(threads, signals, shutdown), ``main`` (CLI wiring).
+Root modules: ``config`` (.env), ``state`` (persistent JSON state),
+``logging_setup`` (JSON logs), ``service`` (publish loop, workers, signals),
+``main`` (CLI wiring).
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

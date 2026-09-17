@@ -22,6 +22,19 @@ from rpi_cam_lattice_service import config as config_module  # noqa: E402
 from rpi_cam_lattice_service.lattice import LatticeClient  # noqa: E402
 
 
+def _print_health(health) -> None:
+    """One line for the roll-up, then one per component and one per alert."""
+    if health is None:
+        print("health:          <none reported>")
+        return
+    print(f"health: {health.health_status.name} connection: {health.connection_status.name}")
+    for component in health.components or []:
+        messages = "; ".join(m.message for m in component.messages or [])
+        print(f"  {component.id} {component.health.name}: {messages}")
+    for alert in health.active_alerts or []:
+        print(f"  ALERT {alert.level.name} {alert.alert_code}: {alert.description}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Read a published entity back from Lattice.")
     parser.add_argument("--config", default=".env")
@@ -59,11 +72,7 @@ def main() -> int:
                 print("   ", definition.task_specification_url)
         else:
             print("task catalog:    <none advertised>")
-        if entity.health is not None:
-            print("health status:  ", entity.health.health_status.name)
-            print("connection:     ", entity.health.connection_status.name)
-        else:
-            print("health:          <none reported>")
+        _print_health(entity.health)
         print("expiry_time:    ", entity.expiry_time.to_datetime().isoformat())
         if not entity.is_live:
             print("WARNING: entity is not live", file=sys.stderr)

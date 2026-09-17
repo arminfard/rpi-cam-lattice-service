@@ -8,7 +8,7 @@ resources or losing its identity. Two things need to outlive a process:
 * the entity's **created_time**, so a stable-id asset keeps one creation time
   across restarts instead of resetting it on every boot.
 
-``StateStore`` minimal: string keys, JSON-serialisable values,
+``StateStore`` is deliberately minimal: string keys, JSON-serialisable values,
 atomic writes (write to a temp file, then ``os.replace``), and a lock so the
 publish loop, the task worker, and the control path can all use it. A missing
 or corrupt file is treated as empty and logged, never raised, because losing

@@ -1,4 +1,4 @@
-"""Structured JSON logging (the analog of the Go service's ``log/slog`` setup).
+"""Structured JSON logging: one JSON object per line, journald-friendly.
 
 Emits one JSON object per line to stdout with a stable set of keys plus any
 structured fields passed via ``extra={...}``.
@@ -36,8 +36,8 @@ class StructuredLogger:
     """Thin wrapper letting call sites pass structured fields as kwargs.
 
     ``logger.info("msg", entity_id=..., count=3)`` routes the fields into the
-    LogRecord's ``extra`` so the JSON formatter can emit them, mirroring Go's
-    ``slog`` key/value style.
+    LogRecord's ``extra`` so the JSON formatter can emit them as key/value
+    fields.
     """
 
     def __init__(self, logger: logging.Logger) -> None:

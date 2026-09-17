@@ -10,8 +10,8 @@ from rpi_cam_lattice_service.entity import (
     EntityBuilder,
     MediaContributor,
     SensorsContributor,
-    StaticHealthContributor,
 )
+from rpi_cam_lattice_service.health import HealthContributor
 from rpi_cam_lattice_service.service import FAILURE_LOG_EVERY, Service
 
 
@@ -47,7 +47,7 @@ def _builder(cfg: Config, video_id: str | None = "vid-1") -> EntityBuilder:
         contributors=[
             SensorsContributor(lambda: CameraObservation(desired_on=True, ready=True)),
             MediaContributor(lambda: video_id),
-            StaticHealthContributor(),
+            HealthContributor(lambda: None),
         ],
     )
 

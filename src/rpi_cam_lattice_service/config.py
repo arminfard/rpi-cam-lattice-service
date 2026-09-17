@@ -27,6 +27,9 @@ class ConfigError(Exception):
     """Raised when configuration is missing or invalid."""
 
 
+# Probing involves a subprocess and an HTTP call; faster than this is noise.
+HEALTH_MIN_SAMPLE_INTERVAL_SECONDS = 0.5
+
 _TRUTHY = {"true", "1", "yes", "on"}
 _FALSY = {"false", "0", "no", "off"}
 
@@ -128,6 +131,19 @@ class Config:
     # Heartbeat interval requested on the agent stream (0 disables heartbeats).
     task_heartbeat_interval_ms: int = 30000
 
+    # --- Health telemetry ---
+    # When enabled, a background sampler probes the Pi (SoC temperature and
+    # throttle flags, power supply, media pipeline, task stream, load/memory/
+    # disk) and the entity carries per-component Health plus alerts. When
+    # disabled the entity still publishes Health, reported NOT_READY.
+    health_enabled: bool = True
+    health_sample_interval_seconds: float = 5.0
+    # SoC temperature thresholds (°C) for the soc-thermal component: WARN at
+    # or above warn, FAIL at or above fail. The firmware's own throttle flags
+    # raise the status regardless of these.
+    health_temp_warn_c: float = 75.0
+    health_temp_fail_c: float = 85.0
+
     # Fields not sourced from the environment.
     _config_path: str = field(default="", repr=False)
 
@@ -167,6 +183,18 @@ class Config:
         if self.task_heartbeat_interval_ms < 0:
             raise ConfigError(
                 f"TASK_HEARTBEAT_INTERVAL_MS must be >= 0, got {self.task_heartbeat_interval_ms}"
+            )
+        if not self.health_sample_interval_seconds >= HEALTH_MIN_SAMPLE_INTERVAL_SECONDS:
+            raise ConfigError(
+                f"HEALTH_SAMPLE_INTERVAL_SECONDS must be >= {HEALTH_MIN_SAMPLE_INTERVAL_SECONDS}, "
+                f"got {self.health_sample_interval_seconds}"
+            )
+        if not (math.isfinite(self.health_temp_warn_c) and math.isfinite(self.health_temp_fail_c)):
+            raise ConfigError("HEALTH_TEMP_WARN_C and HEALTH_TEMP_FAIL_C must be finite")
+        if not self.health_temp_warn_c < self.health_temp_fail_c:
+            raise ConfigError(
+                "HEALTH_TEMP_FAIL_C must be greater than HEALTH_TEMP_WARN_C, got "
+                f"warn={self.health_temp_warn_c} fail={self.health_temp_fail_c}"
             )
 
 
@@ -230,6 +258,20 @@ def load(path: str = ".env") -> Config:
             "TASK_HEARTBEAT_INTERVAL_MS",
             get("TASK_HEARTBEAT_INTERVAL_MS"),
             defaults.task_heartbeat_interval_ms,
+        ),
+        health_enabled=_parse_bool(
+            "HEALTH_ENABLED", get("HEALTH_ENABLED"), defaults.health_enabled
+        ),
+        health_sample_interval_seconds=_parse_float(
+            "HEALTH_SAMPLE_INTERVAL_SECONDS",
+            get("HEALTH_SAMPLE_INTERVAL_SECONDS"),
+            defaults.health_sample_interval_seconds,
+        ),
+        health_temp_warn_c=_parse_float(
+            "HEALTH_TEMP_WARN_C", get("HEALTH_TEMP_WARN_C"), defaults.health_temp_warn_c
+        ),
+        health_temp_fail_c=_parse_float(
+            "HEALTH_TEMP_FAIL_C", get("HEALTH_TEMP_FAIL_C"), defaults.health_temp_fail_c
         ),
         _config_path=path,
     )

@@ -3,8 +3,7 @@
 #
 # Captures the Raspberry Pi Camera and PUSHES the encoded stream as SRT
 # (caller mode) to a destination, using ffmpeg as the egress transport
-# (kicked off by a runOnReady hook). This mirrors the sibling mpeg-ts-server,
-# but the egress is SRT instead of MPEG-TS-over-UDP.
+# (kicked off by a runOnReady hook).
 #
 # The SRT destination is taken from the $SRT_TARGET environment variable,
 # which the rpi-cam-lattice-service writes (the SRT ingress URL returned by
@@ -56,9 +55,8 @@ authInternalUsers:
 # Global settings -> Servers
 #
 # Only a localhost RTSP listener is enabled, purely so the egress ffmpeg can
-# pull the camera stream and re-emit it as SRT. Port 30202 avoids clashing
-# with the sibling rtsp-server (30200) and mpeg-ts-server (30201). This server
-# PUSHES SRT out (caller), so it does NOT run an SRT listener.
+# pull the camera stream and re-emit it as SRT. This server PUSHES SRT out
+# (caller), so it does NOT run an SRT listener.
 rtsp: yes
 rtspTransports: [tcp]
 rtspEncryption: "no"
@@ -89,7 +87,7 @@ pathDefaults:
   overridePublisher: yes
   record: no
 
-  # Raspberry Pi Camera defaults — same as the sibling projects.
+  # Raspberry Pi Camera defaults.
   rpiCameraCamID: 0
   rpiCameraWidth: 1920
   rpiCameraHeight: 1080

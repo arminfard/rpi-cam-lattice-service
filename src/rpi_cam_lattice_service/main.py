@@ -36,12 +36,22 @@ from .entity import (
     LocationContributor,
     MediaContributor,
     SensorsContributor,
-    StaticHealthContributor,
     TaskCatalogContributor,
+)
+from .health import (
+    HealthContributor,
+    HealthSampler,
+    PipelineProbe,
+    PowerProbe,
+    Probe,
+    SystemProbe,
+    TaskStreamProbe,
+    ThermalProbe,
+    ThrottledFlagsReader,
 )
 from .lattice import LatticeClient
 from .logging_setup import configure, get_logger
-from .service import Service
+from .service import Service, Worker
 from .state import StateStore
 from .tasking.handler import TaskHandler
 
@@ -101,6 +111,36 @@ def _build_control(
     return CameraControl(pipeline=pipeline, video=video)
 
 
+def _build_health(
+    config: Config,
+    control: CameraControl,
+    pipeline: CommandPipeline,
+    task_handler: TaskHandler | None,
+) -> HealthSampler | None:
+    """The health probes and the worker that samples them; ``None`` when disabled."""
+    if not config.health_enabled:
+        return None
+    throttled = ThrottledFlagsReader()  # one ``vcgencmd`` per round, shared by two probes
+    probes: list[Probe] = [
+        ThermalProbe(
+            throttled=throttled,
+            warn_c=config.health_temp_warn_c,
+            fail_c=config.health_temp_fail_c,
+        ),
+        PowerProbe(throttled=throttled),
+        PipelineProbe(status=pipeline.status, desired_on=lambda: control.snapshot().desired_on),
+        SystemProbe(),
+    ]
+    if task_handler is not None:
+        probes.append(
+            TaskStreamProbe(
+                stream_state=task_handler.stream_state,
+                heartbeat_interval_ms=config.task_heartbeat_interval_ms,
+            )
+        )
+    return HealthSampler(probes, interval_s=config.health_sample_interval_seconds)
+
+
 def _build_entity_builder(
     config: Config,
     *,
@@ -109,19 +149,34 @@ def _build_entity_builder(
     control: CameraControl,
     pipeline: CommandPipeline,
     task_handler: TaskHandler | None,
+    health: HealthSampler | None,
 ) -> EntityBuilder:
     """Compose the entity: identity floor plus one contributor per component."""
 
     def observe() -> CameraObservation:
-        snapshot = control.snapshot()
-        ready = pipeline.status().ready if snapshot.desired_on else None
-        return CameraObservation(desired_on=snapshot.desired_on, ready=ready)
+        # Runs on every publish tick, so it must not block: with health
+        # enabled the pipeline status comes from the sampler's cache (at most
+        # one sampling interval old); without it, from the pipeline's own
+        # short-timeout, TTL-cached probe as before.
+        desired_on = control.snapshot().desired_on
+        if not desired_on:
+            return CameraObservation(desired_on=False, ready=None)
+        if health is None:
+            return CameraObservation(desired_on=True, ready=pipeline.status().ready)
+        snapshot = health.snapshot()
+        if snapshot is None:
+            return CameraObservation(desired_on=True, ready=None)
+        ready = snapshot.pipeline.ready if snapshot.pipeline is not None else None
+        return CameraObservation(desired_on=True, ready=ready, degraded=snapshot.is_degraded)
 
+    # With health disabled the contributor still publishes Health, as
+    # NOT_READY, so operators see that nothing is being sampled.
+    health_snapshot = health.snapshot if health is not None else lambda: None
     contributors: list[EntityContributor] = [
         LocationContributor(source),
         SensorsContributor(observe),
         MediaContributor(lambda: control.snapshot().video_id),
-        StaticHealthContributor(),
+        HealthContributor(health_snapshot),
     ]
     if task_handler is not None:
         contributors.append(TaskCatalogContributor(task_handler.task_specification_urls))
@@ -191,6 +246,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             logger.info("tasking disabled (TASKING_ENABLED=false)")
 
+        health = _build_health(config, control, pipeline, task_handler)
+        if health is None:
+            logger.info("health telemetry disabled (HEALTH_ENABLED=false)")
+
         builder = _build_entity_builder(
             config,
             created_time=_created_time(state),
@@ -198,15 +257,23 @@ def main(argv: list[str] | None = None) -> int:
             control=control,
             pipeline=pipeline,
             task_handler=task_handler,
+            health=health,
         )
-        workers = [("tasking", task_handler.run)] if task_handler is not None else []
+        workers: list[tuple[str, Worker]] = []
+        if task_handler is not None:
+            workers.append(("tasking", task_handler.run))
+        if health is not None:
+            workers.append(("health", health.run))
         service = Service(config, client, builder=builder, workers=workers)
         # Start/Stop push their outcome to the asset immediately (Media item
         # added or cleared) instead of waiting for the next 1 Hz tick.
         control.on_change = service.publish_now
 
         # Archive an ingress a crashed predecessor never cleaned up, then
-        # register a fresh one.
+        # register a fresh one. Sample health first so the publish that
+        # follows the initial Start already carries real telemetry.
+        if health is not None:
+            health.sample_once()
         control.recover()
         _initial_start(control, logger)
         return service.run()

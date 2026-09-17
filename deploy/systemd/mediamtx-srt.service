@@ -25,7 +25,7 @@
 [Unit]
 Description=MediaMTX SRT Push Server (Raspberry Pi Camera)
 # The camera can only be opened by one process at a time - stop any other
-# camera unit (e.g. a sibling rtsp-server / mpeg-ts-server) first.
+# camera unit first.
 After=network-online.target rpi-cam-lattice-service.service
 Wants=network-online.target
 # Belt and braces: if the SRT target has not been written yet, a start is
