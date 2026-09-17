@@ -103,14 +103,3 @@ contributors.append(HealthContributor(sampler.snapshot))
 workers.append(("health", sampler.run))
 ```
 
-## Rules the code follows
-
-- The entity reports what is observed, not what was intended: a start command
-  exiting 0 is not proof that video is flowing.
-- No lock is held across an RPC, a subprocess, or a callback; the 1 Hz
-  heartbeat must never wait, because the entity expires after 10 s.
-- The daemon owns the media pipeline and persists what it must clean up; an
-  ingress left by a crash is archived at the next boot.
-- The daemon is an agent only. It never creates tasks, and a test fails if
-  task creation appears in the package.
-- Done means read back from a separate process, not "publish returned".

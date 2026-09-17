@@ -3,7 +3,7 @@
 ``CameraState`` is a plain-Python snapshot of what the camera reports about
 itself, deliberately decoupled from any Lattice/protobuf type. The Raspberry Pi
 camera is a *stationary* sensor: it reports a fixed geodetic location from
-config. Its video is not carried here; that is the ``VideoIngress`` lifecycle.
+config.
 """
 
 from __future__ import annotations
@@ -49,8 +49,7 @@ def pi_serial_number(path: str = PI_CPUINFO_PATH) -> str | None:
 
     Used as the entity's alternate id when none is configured: it is stable
     across reinstalls and unique per board, so other systems can correlate
-    the asset with the physical unit. Off a Pi (no ``Serial`` line, or no
-    such file) there is nothing to report and the alias is simply omitted.
+    the asset with the physical unit.
     """
     try:
         with open(path, encoding="utf-8") as handle:
