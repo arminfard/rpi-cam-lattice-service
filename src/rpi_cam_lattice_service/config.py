@@ -29,6 +29,8 @@ class ConfigError(Exception):
 
 # Probing involves a subprocess and an HTTP call; faster than this is noise.
 HEALTH_MIN_SAMPLE_INTERVAL_SECONDS = 0.5
+# Heartbeats are required on the agent stream when tasking is enabled.
+MIN_TASK_HEARTBEAT_MS = 1000
 
 _TRUTHY = {"true", "1", "yes", "on"}
 _FALSY = {"false", "0", "no", "off"}
@@ -128,7 +130,9 @@ class Config:
     # Shell commands run to start/stop the video stream (empty = state only).
     task_start_command: str = ""
     task_stop_command: str = ""
-    # Heartbeat interval requested on the agent stream (0 disables heartbeats).
+    # Heartbeat interval requested on the agent stream. Heartbeats are required
+    # (>= 1000 ms) when tasking is enabled: the health "tasking" probe uses
+    # them to tell a quiet stream from a dead one.
     task_heartbeat_interval_ms: int = 30000
 
     # --- Health telemetry ---
@@ -183,6 +187,12 @@ class Config:
         if self.task_heartbeat_interval_ms < 0:
             raise ConfigError(
                 f"TASK_HEARTBEAT_INTERVAL_MS must be >= 0, got {self.task_heartbeat_interval_ms}"
+            )
+        if self.tasking_enabled and self.task_heartbeat_interval_ms < MIN_TASK_HEARTBEAT_MS:
+            raise ConfigError(
+                f"TASK_HEARTBEAT_INTERVAL_MS must be >= {MIN_TASK_HEARTBEAT_MS} when "
+                f"TASKING_ENABLED=true (the health probe relies on heartbeats), "
+                f"got {self.task_heartbeat_interval_ms}"
             )
         if not self.health_sample_interval_seconds >= HEALTH_MIN_SAMPLE_INTERVAL_SECONDS:
             raise ConfigError(

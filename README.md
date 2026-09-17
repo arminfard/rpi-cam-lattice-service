@@ -151,8 +151,9 @@ publish and the loop runs at 1 Hz, so one heartbeat blocked behind a 30 s
 VideoManager call or `systemctl` timeout would take the camera off the map.
 `CameraControl` has a transition lock that serialises the transitions and a
 separate state lock that is never held while calling the pipeline, the
-ingress, or the publish callback. `VideoIngress` and
-`TaskHandler.stream_state()` follow the same rule. The MediaMTX probe is
+ingress, or the publish callback. `VideoIngress`,
+`TaskHandler.stream_state()` and the OAuth token cache in `lattice/auth.py`
+follow the same rule. The MediaMTX probe is
 cached (2 s TTL, 0.5 s timeout) and health probes run on their own worker
 thread, never on the publish tick.
 
@@ -230,7 +231,7 @@ The components and how observations map to Lattice `HealthStatus` values:
 | Component id | Source (verified on this Pi) | Mapping |
 |---|---|---|
 | `soc-thermal` | `/sys/class/thermal/thermal_zone0/temp`; `vcgencmd get_throttled` bit 3 | at or above `HEALTH_TEMP_WARN_C` or soft limit active: `WARN`; throttled now (bit 2) or at or above `HEALTH_TEMP_FAIL_C`: `FAIL`; alert `THERMAL_THROTTLE` (`WARNING`) |
-| `power` | `vcgencmd get_throttled` bit 0 / bit 16 | under-voltage now: `FAIL`; occurred since boot: `WARN`; alert `UNDER_VOLTAGE` (`CAUTION`) |
+| `power` | `vcgencmd get_throttled` bits 0, 16, 17, 18 | under-voltage now: `FAIL`; under-voltage, frequency capping or throttling occurred since boot: `WARN`; alert `UNDER_VOLTAGE` (`CAUTION`) |
 | `camera` | `PipelineStatus.ready` | desired on and `False`: `FAIL`; `None` (probe unavailable): `NOT_READY` |
 | `stream` | `PipelineStatus.pushing` | desired on and `False`: `FAIL`; desired off: `NOT_READY` "stopped by operator" |
 | `tasking` | `TaskHandler.stream_state()` | heartbeat older than twice the interval: `WARN`; disconnected: `OFFLINE` |
@@ -303,7 +304,7 @@ Config is read once at startup; changing it requires a restart.
 | `TASKING_ENABLED` | Advertise the task catalog and listen for tasks (default `true`). |
 | `TASK_PACKAGE` | Protobuf package of the task definitions (default `anduril.sample_app_rpi_cam.camera.v1alpha`); must match `task-def/`. |
 | `TASK_START_COMMAND` / `TASK_STOP_COMMAND` | Shell commands that bring the stream up and down. On the Pi: `sudo systemctl restart mediamtx-srt` and `sudo systemctl stop mediamtx-srt`. Empty = state-only transitions (development off the Pi). |
-| `TASK_HEARTBEAT_INTERVAL_MS` | Heartbeat interval requested on the agent stream (default `30000`; `0` disables). |
+| `TASK_HEARTBEAT_INTERVAL_MS` | Heartbeat interval requested on the agent stream (default `30000`; must be at least `1000` while tasking is enabled, because the health `tasking` component relies on heartbeats). |
 
 `sudo` matches the full command line, so `TASK_START_COMMAND` and
 `TASK_STOP_COMMAND` must be byte-identical to the commands in
@@ -391,7 +392,10 @@ advertising one:
    *archives* the record rather than deleting it (it stays retrievable under
    its id), which is why the next Start must not reuse the id. If archiving
    fails the task ends `DONE_NOT_OK`, the sensor already reads `OFF`, and the
-   id is kept so a repeated Stop retries it.
+   id is kept so a repeated Stop retries it. The next `Start` archives that
+   leftover first (it may already be dead server-side) and only then
+   registers a fresh ingress; a `Start` repeated while the stream is already
+   on reuses the live ingress.
 3. **Entity updates**: each transition ends by publishing the asset at once
    (`Service.publish_now`). After `Start` the `Media` items carry the new id;
    after `Stop` they are an explicitly empty list, which clears the archived
@@ -399,7 +403,14 @@ advertising one:
 
 The agent stream reconnects with exponential backoff and jitter (1 s doubling
 to a 30 s cap). Every status update carries a strictly increasing
-`status_version`.
+`status_version`: the counter starts from the delivered version, adopts the
+version Lattice returns after each update, and is re-read with `GetTask` when
+a cancel or complete request arrives, since those bump the version server-side
+but carry only the task id. Start and Stop are not interruptible, so a cancel
+that lands mid-action is honoured afterwards: the task ends `DONE_NOT_OK` with
+`CANCELLED` even though the action completed. A complete request marks the
+task terminal locally and nothing more is sent. Once shutdown has begun, any
+queued Start or Stop fails with `DONE_NOT_OK` instead of undoing the cleanup.
 
 ## Test and lint
 
@@ -408,8 +419,10 @@ make check        # ruff check, ruff format --check, mypy, pytest
 make test         # pytest only
 ```
 
-Tests use fakes for the Lattice client, the pipeline, and the probes; nothing
-talks to Lattice or runs a command. CI (`.github/workflows/ci.yml`) runs the
+Tests use fakes for the Lattice client, the MediaMTX API, and the probes;
+nothing talks to Lattice, the camera, or `vcgencmd`. The pipeline tests run
+harmless shell commands (`true`, `exit 7`, `cp`) to exercise the real
+`subprocess` path. CI (`.github/workflows/ci.yml`) runs the
 same steps on Python 3.11 and 3.12.
 
 ## Deploy (systemd on the Pi)

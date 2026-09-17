@@ -36,7 +36,10 @@ Restart=always
 RestartSec=5
 
 # Graceful shutdown: the service handles SIGTERM and drains within 30s.
-TimeoutStopSec=35
+# Shutdown budget: stop MediaMTX (its own unit stops within 10 s), archive
+# the ingress (30 s RPC timeout), publish the entity offline, join the
+# publisher. Must exceed the worst case so SIGKILL never skips the archive.
+TimeoutStopSec=120
 
 # Hardening. Chosen to stay compatible with the sudo call the Start/Stop tasks
 # make (TASK_START_COMMAND / TASK_STOP_COMMAND):

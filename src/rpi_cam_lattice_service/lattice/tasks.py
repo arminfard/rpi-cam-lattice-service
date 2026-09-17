@@ -12,6 +12,7 @@ from anduril.taskmanager.v1.task_manager_api_pub_connect import (
 )
 from anduril.taskmanager.v1.task_manager_api_pub_pb import (
     EntityIds,
+    GetTaskRequest,
     ListenAsAgentRequest,
     ListenAsAgentResponse,
     UpdateStatusRequest,
@@ -22,6 +23,7 @@ from anduril.taskmanager.v1.task_pub_pb import (
     Status,
     StatusUpdate,
     System,
+    Task,
     TaskError,
     TaskStatus,
     TaskVersion,
@@ -89,3 +91,17 @@ class TaskClient:
             timeout_ms=timeout_ms,
         )
         return response.task.version
+
+    def get_task(self, task_id: str, *, timeout_ms: int | None = 10000) -> Task:
+        """Read a task back.
+
+        The agent uses this to resynchronise its status version when the
+        server changes the task behind its back (a cancel or complete request
+        carries only the task id, not the new version).
+        """
+        response = self.stub.get_task(
+            GetTaskRequest(task_id=task_id),
+            headers=self._auth.headers(),
+            timeout_ms=timeout_ms,
+        )
+        return response.task

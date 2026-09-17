@@ -285,6 +285,20 @@ def test_heartbeat_interval_non_negative():
     cfg.task_heartbeat_interval_ms = -1
     with pytest.raises(ConfigError, match="TASK_HEARTBEAT_INTERVAL_MS"):
         cfg.validate()
+    cfg.task_heartbeat_interval_ms = 1000
+    cfg.validate()
+
+
+def test_heartbeats_required_when_tasking_enabled():
+    # The health "tasking" probe relies on heartbeats, so 0 (disabled) and
+    # sub-second intervals are rejected while tasking is on, but fine when off.
+    cfg = _valid()
+    cfg.tasking_enabled = True
+    for value in (0, 999):
+        cfg.task_heartbeat_interval_ms = value
+        with pytest.raises(ConfigError, match="TASK_HEARTBEAT_INTERVAL_MS must be >= 1000"):
+            cfg.validate()
+    cfg.tasking_enabled = False
     cfg.task_heartbeat_interval_ms = 0
     cfg.validate()
 

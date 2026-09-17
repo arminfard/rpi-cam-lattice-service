@@ -425,5 +425,134 @@ def test_shutdown_does_not_publish(tmp_path):
     control.shutdown()
     assert len(publisher.snapshots) == 1  # main.py publishes the offline entity itself
     assert control.snapshot() == ControlSnapshot(
-        desired_on=False, video_id=None, in_transition=False
+        desired_on=False, video_id=None, in_transition=False, closed=True
     )
+
+
+# --- leftover ingress after a failed Stop, and the closed state -------------
+
+
+def test_start_after_failed_archive_registers_a_fresh_ingress(tmp_path):
+    """A Stop whose archive failed keeps the id for retry, but the next Start must
+    not push at that possibly server-archived ingress: archive it, then create new."""
+    client, video, control, target = _setup(tmp_path, fail_delete=True)
+    control.start()
+    first = control.snapshot().video_id
+    with pytest.raises(CameraControlError, match="could not be archived"):
+        control.stop()
+    assert control.snapshot() == ControlSnapshot(
+        desired_on=False, video_id=first, in_transition=False
+    )
+
+    client.video.fail_delete = False
+    control.start()
+    second = control.snapshot().video_id
+    assert second != first
+    assert [c[0] for c in client.calls] == ["create", "delete", "delete", "create"]
+    assert client.calls[2][1] == first  # the leftover was archived before the new create
+
+
+def test_start_after_failed_archive_fails_if_the_leftover_cannot_be_archived(tmp_path):
+    client, video, control, target = _setup(tmp_path, fail_delete=True)
+    control.start()
+    first = control.snapshot().video_id
+    with pytest.raises(CameraControlError):
+        control.stop()
+    with pytest.raises(CameraControlError, match="left by a failed Stop"):
+        control.start()
+    # Still off, still holding the leftover for the next retry, nothing new created.
+    snap = control.snapshot()
+    assert snap.desired_on is False and snap.video_id == first
+    assert [c[0] for c in client.calls] == ["create", "delete", "delete"]
+
+
+def test_repeated_start_while_on_reuses_the_live_ingress(tmp_path):
+    client, video, control, target = _setup(tmp_path)
+    control.start()
+    first = control.snapshot().video_id
+    control.start()  # e.g. retry after a failed publish
+    assert control.snapshot().video_id == first
+    assert [c[0] for c in client.calls] == ["create"]
+
+
+def test_transitions_are_refused_after_shutdown(tmp_path):
+    client, video, control, target = _setup(tmp_path)
+    control.start()
+    control.shutdown()
+    assert control.snapshot().closed is True
+    with pytest.raises(CameraControlError, match="shutting down"):
+        control.start()
+    with pytest.raises(CameraControlError, match="shutting down"):
+        control.stop()
+    # Nothing was re-created or re-archived after the shutdown cleanup.
+    assert [c[0] for c in client.calls] == ["create", "delete"]
+    assert control.snapshot().desired_on is False
+
+
+def test_start_queued_behind_shutdown_is_refused(tmp_path):
+    """A Start task waiting on the transition lock while shutdown() runs must fail
+    once it gets the lock, not undo the cleanup."""
+    client, video, control, target = _setup(tmp_path)
+    control.start()
+    # Make shutdown's archive block so a start() can queue behind it.
+    client.video.entered = threading.Event()
+    client.video.release = threading.Event()
+    original_delete = client.video.delete_srt_ingress
+
+    def blocking_delete(ingress_id, *, timeout_ms=None):
+        client.video.entered.set()
+        assert client.video.release.wait(5.0)
+        return original_delete(ingress_id, timeout_ms=timeout_ms)
+
+    client.video.delete_srt_ingress = blocking_delete
+
+    shutdown_thread = threading.Thread(target=control.shutdown)
+    shutdown_thread.start()
+    assert client.video.entered.wait(5.0)
+
+    errors: list[Exception] = []
+
+    def queued_start():
+        try:
+            control.start()
+        except CameraControlError as exc:
+            errors.append(exc)
+
+    start_thread = threading.Thread(target=queued_start)
+    start_thread.start()
+    client.video.release.set()
+    shutdown_thread.join(5.0)
+    start_thread.join(5.0)
+
+    assert len(errors) == 1 and "shutting down" in str(errors[0])
+    assert [c[0] for c in client.calls] == ["create", "delete"]
+    assert control.snapshot().video_id is None
+
+
+# --- ingress record persistence failure -----------------------------------
+
+
+class ExplodingState:
+    """A StateStore whose set() raises, as a full or read-only card would before
+    StateStore learned to swallow OSError; the ingress must still not leak."""
+
+    def get(self, key):
+        return None
+
+    def set(self, key, value):
+        raise RuntimeError("disk full")
+
+    def delete(self, key):
+        pass
+
+
+def test_create_archives_the_ingress_when_the_record_cannot_be_written(tmp_path):
+    client = FakeClient()
+    video = VideoIngress(
+        client, title="cam", srt_target_file=str(tmp_path / "t.env"), state=ExplodingState()
+    )
+    with pytest.raises(RuntimeError, match="disk full"):
+        video.create()
+    assert video.video_id is None
+    assert [c[0] for c in client.calls] == ["create", "delete"]
+    assert not (tmp_path / "t.env").exists()

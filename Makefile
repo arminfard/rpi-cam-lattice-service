@@ -31,7 +31,8 @@ check: lint typecheck test
 # Override on the command line, e.g.
 #   make install-units SERVICE_USER=rpi-cam INSTALL_DIR=/opt/rpi-cam-lattice-service
 INSTALL_DIR  ?= $(CURDIR)
-SERVICE_USER ?= $(shell id -un)
+# Under `sudo make install-units` the invoking user is SUDO_USER, not root.
+SERVICE_USER ?= $(if $(SUDO_USER),$(SUDO_USER),$(shell id -un))
 RENDER_DIR   := build
 RENDERED_UNITS   := $(addprefix $(RENDER_DIR)/,$(UNITS))
 RENDERED_SUDOERS := $(RENDER_DIR)/$(SUDOERS)

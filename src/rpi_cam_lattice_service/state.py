@@ -33,6 +33,7 @@ class StateStore:
     def __init__(self, path: str) -> None:
         self._path = path
         self._lock = threading.Lock()
+        self._last_flush_error: str | None = None
         self._data: dict[str, Any] = self._load()
 
     @property
@@ -78,13 +79,32 @@ class StateStore:
         return data
 
     def _flush(self) -> None:
+        """Write the file; on failure keep the in-memory value and warn once.
+
+        Persistence is best-effort: an unwritable path (full or read-only
+        card) must not crash the daemon at its first boot write, it only
+        loses crash recovery until the disk is fixed. The warning repeats only
+        when the error changes, because writes happen on every transition.
+        """
         if not self._path:
             return
-        parent = os.path.dirname(self._path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        tmp = f"{self._path}.tmp"
-        with open(tmp, "w", encoding="utf-8") as handle:
-            json.dump(self._data, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-        os.replace(tmp, self._path)
+        try:
+            parent = os.path.dirname(self._path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            tmp = f"{self._path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as handle:
+                json.dump(self._data, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+            os.replace(tmp, self._path)
+        except OSError as exc:
+            message = str(exc)
+            if message != self._last_flush_error:
+                self._last_flush_error = message
+                logger.warning(
+                    "state file could not be written; keeping state in memory only",
+                    state_file=self._path,
+                    error=message,
+                )
+            return
+        self._last_flush_error = None

@@ -15,7 +15,7 @@ from collections.abc import Iterator
 
 from anduril.taskmanager.v1.task_api_pub_pb import CancelRequest, ExecuteRequest
 from anduril.taskmanager.v1.task_manager_api_pub_pb import Heartbeat, ListenAsAgentResponse
-from anduril.taskmanager.v1.task_pub_pb import Status, Task, TaskVersion
+from anduril.taskmanager.v1.task_pub_pb import ErrorCode, Status, Task, TaskVersion
 from protobuf import Oneof
 from protobuf.wkt import any_pb
 
@@ -35,12 +35,31 @@ class FakeTasks:
         # One callable per listen_as_agent call; each returns an iterator or raises.
         self.streams = list(streams or [])
         self.listen_calls = 0
+        # The server may report a higher status version than the one sent
+        # (returned_bump), and get_task reports server_version when set.
+        self.returned_bump = 0
+        self.server_version: int | None = None
+        self.fail_get = False
+        self.get_calls: list[str] = []
 
     def update_task_status(self, **kwargs):
         if self.fail_update:
             raise RuntimeError("update_status unavailable")
         self.updates.append(kwargs)
-        return TaskVersion(task_id=kwargs["task_id"], status_version=kwargs["status_version"])
+        return TaskVersion(
+            task_id=kwargs["task_id"],
+            status_version=kwargs["status_version"] + self.returned_bump,
+        )
+
+    def get_task(self, task_id: str, *, timeout_ms=None):
+        self.get_calls.append(task_id)
+        if self.fail_get:
+            raise RuntimeError("get_task unavailable")
+        return Task(
+            version=TaskVersion(
+                task_id=task_id, definition_version=1, status_version=self.server_version or 0
+            )
+        )
 
     def listen_as_agent(self, entity_id: str, *, heartbeat_interval_ms: int):
         self.listen_calls += 1
@@ -287,3 +306,99 @@ def test_run_resets_backoff_after_a_message():
     assert 2 * base <= stop.waits[2] <= 4 * base
     assert base / 2 <= stop.waits[3] <= base
     assert handler.stream_state().reconnects == 4
+
+
+# --- status versions vs the server, cancel and complete mid-action ------------
+
+
+class BlockingControl(FakeControl):
+    """A control whose stop() blocks until the test releases it, so a cancel or
+    complete request can arrive while the action is running."""
+
+    def __init__(self) -> None:
+        super().__init__(streaming=True)
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def stop(self) -> None:
+        self.started.set()
+        assert self.release.wait(5.0), "test never released the action"
+        self.streaming = False
+
+
+def _cancel(task_id: str) -> ListenAsAgentResponse:
+    return ListenAsAgentResponse(request=Oneof("cancel_request", CancelRequest(task_id=task_id)))
+
+
+def _complete(task_id: str) -> ListenAsAgentResponse:
+    from anduril.taskmanager.v1.task_api_pub_pb import CompleteRequest
+
+    return ListenAsAgentResponse(
+        request=Oneof("complete_request", CompleteRequest(task_id=task_id))
+    )
+
+
+def test_update_adopts_a_higher_server_reported_version():
+    client = FakeClient()
+    client.tasks.returned_bump = 5  # server answers EXECUTING@4 with version 9
+    handler, control = _handler(client)
+    handler.handle_response(_execute_response("t-10", task_type_url(PACKAGE, "Stop"), 3))
+    _drain_threads()
+    assert [u["status"] for u in client.updates] == [Status.EXECUTING, Status.DONE_OK]
+    assert [u["status_version"] for u in client.updates] == [4, 10]
+
+
+def test_cancel_during_action_ends_done_not_ok_cancelled_above_server_version():
+    client = FakeClient()
+    control = BlockingControl()
+    handler, _ = _handler(client, control)
+    handler.handle_response(_execute_response("t-11", task_type_url(PACKAGE, "Stop"), 3))
+    assert control.started.wait(5.0)
+
+    # The operator cancels: the server has moved the task to version 7.
+    client.tasks.server_version = 7
+    handler.handle_response(_cancel("t-11"))
+    control.release.set()
+    _drain_threads()
+
+    assert client.tasks.get_calls == ["t-11"]
+    assert control.streaming is False  # the action is not interruptible
+    statuses = [u["status"] for u in client.updates]
+    assert statuses == [Status.EXECUTING, Status.DONE_NOT_OK]
+    final = client.updates[-1]
+    assert final["status_version"] == 8  # strictly above the re-read version
+    assert final["error_code"] == ErrorCode.CANCELLED
+    assert "cancelled by operator" in final["error_message"]
+
+
+def test_complete_request_marks_terminal_and_suppresses_the_final_update():
+    client = FakeClient()
+    control = BlockingControl()
+    handler, _ = _handler(client, control)
+    handler.handle_response(_execute_response("t-12", task_type_url(PACKAGE, "Stop"), 3))
+    assert control.started.wait(5.0)
+
+    client.tasks.server_version = 6
+    handler.handle_response(_complete("t-12"))
+    control.release.set()
+    _drain_threads()
+
+    assert [u["status"] for u in client.updates] == [Status.EXECUTING]
+    assert client.tasks.get_calls == ["t-12"]
+
+
+def test_get_task_failure_during_cancel_is_tolerated():
+    client = FakeClient()
+    client.tasks.fail_get = True
+    control = BlockingControl()
+    handler, _ = _handler(client, control)
+    handler.handle_response(_execute_response("t-13", task_type_url(PACKAGE, "Stop"), 3))
+    assert control.started.wait(5.0)
+    handler.handle_response(_cancel("t-13"))
+    control.release.set()
+    _drain_threads()
+
+    statuses = [u["status"] for u in client.updates]
+    assert statuses == [Status.EXECUTING, Status.DONE_NOT_OK]
+    assert [u["status_version"] for u in client.updates] == [4, 5]  # local counter
+    assert client.updates[-1]["error_code"] == ErrorCode.CANCELLED

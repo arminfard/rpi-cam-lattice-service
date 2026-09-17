@@ -96,14 +96,15 @@ class VideoIngress:
             ingress_id=ingress_id,
         )
         logger.info("registered SRT ingress", video_id=info.video_id, push_url=info.push_url)
-        # Persist first: from here on the ingress exists in Lattice, and a
-        # crash before the env file is written must still be recoverable.
-        self._persist(info)
+        # From here on the ingress exists in Lattice. Persist first, so a crash
+        # before the env file is written is still recoverable at the next boot;
+        # if either local step fails, nothing else will ever find this ingress,
+        # so archive it now rather than leak it.
         try:
+            self._persist(info)
             self._write_srt_target(info.push_url)
-        except OSError:
-            # MediaMTX could never reach this ingress; do not leave it behind.
-            self._archive_best_effort(info.video_id, "srt target file could not be written")
+        except Exception:
+            self._archive_best_effort(info.video_id, "ingress could not be recorded locally")
             raise
         with self._lock:
             self._info = info

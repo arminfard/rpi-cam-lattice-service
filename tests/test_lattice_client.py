@@ -223,3 +223,21 @@ def test_lattice_client_exposes_per_api_clients_and_closes():
         for legacy in ("publish_entity", "get_entity", "listen_as_agent", "update_task_status"):
             assert not hasattr(client, legacy)
     client.close()  # idempotent after the context manager already closed it
+
+
+def test_get_task_reads_back_the_task_with_auth():
+    from anduril.taskmanager.v1.task_manager_api_pub_pb import GetTaskResponse
+
+    task = Task(version=TaskVersion(task_id="t-9", definition_version=1, status_version=4))
+    client = TaskClient(BASE_URL, SyncClient(), FakeAuth())
+    stub = FakeStub(GetTaskResponse(task=task))
+    client.stub = stub
+
+    result = client.get_task("t-9", timeout_ms=5000)
+
+    assert result.version.status_version == 4
+    name, request, kwargs = stub.calls[0]
+    assert name == "get_task"
+    assert request.task_id == "t-9"
+    assert kwargs["headers"] == HEADERS
+    assert kwargs["timeout_ms"] == 5000

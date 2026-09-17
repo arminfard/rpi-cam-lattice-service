@@ -129,7 +129,7 @@ class CommandPipeline:
                 env=env,
             )
         except subprocess.TimeoutExpired as exc:
-            raise PipelineError(f"{action} command timed out after {self._timeout_s:.0f}s") from exc
+            raise PipelineError(f"{action} command timed out after {self._timeout_s:g}s") from exc
         except OSError as exc:
             raise PipelineError(f"{action} command could not run: {exc}") from exc
         if result.returncode != 0:

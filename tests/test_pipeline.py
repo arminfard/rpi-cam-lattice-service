@@ -57,7 +57,7 @@ def test_command_pipeline_truncates_output_to_last_500_chars():
 
 def test_command_pipeline_timeout():
     pipeline = CommandPipeline(start_command="sleep 5", timeout_s=0.2)
-    with pytest.raises(PipelineError, match="start command timed out after 0s"):
+    with pytest.raises(PipelineError, match="start command timed out after 0.2s"):
         pipeline.start("srt://x")
 
 

@@ -33,6 +33,9 @@ Wants=network-online.target
 ConditionPathExists=@INSTALL_DIR@/srt_target.env
 
 [Service]
+# Bounded so the daemon's Stop task and its own shutdown never wait on a
+# hung ffmpeg for systemd's 90 s default.
+TimeoutStopSec=10
 Type=simple
 WorkingDirectory=@INSTALL_DIR@
 # The SRT push destination, written by rpi-cam-lattice-service as

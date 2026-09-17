@@ -33,6 +33,17 @@ likewise non-blocking, so the 1 Hz heartbeat can always read the state in
 microseconds while a transition is stuck in a 30 s RPC. The entity expires
 10 s after its last publish; one blocked heartbeat would take it off the map.
 
+Two more rules keep the invariant "never push at, or advertise, a dead stream":
+
+* A Stop whose archive failed keeps the ingress id so a retry can finish, but
+  the server may already have archived it. The next ``start()`` therefore
+  archives that leftover first and registers a fresh ingress; the idempotent
+  reuse of a live ingress applies only while the stream is already on.
+* ``shutdown()`` closes the control before it takes the transition lock. A
+  Start task queued behind it fails with ``CameraControlError`` instead of
+  re-creating an ingress and restarting MediaMTX after the daemon has cleaned
+  up and published itself offline.
+
 The pipeline is optional: with ``pipeline=None`` transitions are state-only
 (development off the Pi), exactly like a ``CommandPipeline`` with empty
 commands.
@@ -63,6 +74,7 @@ class ControlSnapshot:
     desired_on: bool  # the operator's last successful Start/Stop intent
     video_id: str | None  # the ingress id currently advertised, if any
     in_transition: bool  # a Start/Stop/shutdown is in progress right now
+    closed: bool = False  # shutdown() has begun; no further transitions
 
 
 class CameraControl:
@@ -85,6 +97,7 @@ class CameraControl:
         self.on_change = on_change
         self._desired_on = desired_on
         self._in_transition = False
+        self._closed = False
         self._transition_lock = threading.Lock()
         self._state_lock = threading.Lock()
 
@@ -95,17 +108,34 @@ class CameraControl:
         with self._state_lock:
             desired_on = self._desired_on
             in_transition = self._in_transition
+            closed = self._closed
         return ControlSnapshot(
-            desired_on=desired_on, video_id=self._video_id(), in_transition=in_transition
+            desired_on=desired_on,
+            video_id=self._video_id(),
+            in_transition=in_transition,
+            closed=closed,
         )
 
     # -- transitions ---------------------------------------------------------
 
     def start(self) -> None:
-        """Register a fresh ingress, then bring the pipeline up."""
+        """Register a fresh ingress, then bring the pipeline up.
+
+        A leftover ingress from a Stop whose archive failed is archived first
+        (it may already be dead server-side); a live ingress from a Start
+        whose publish failed is reused.
+        """
         with self._transition_lock, self._transitioning():
+            self._ensure_open()
             push_url = ""
             if self._video is not None:
+                if not self._desired() and self._video_id() is not None:
+                    try:
+                        self._video.delete()
+                    except Exception as exc:
+                        raise CameraControlError(
+                            f"could not archive the ingress left by a failed Stop: {exc}"
+                        ) from exc
                 try:
                     push_url = self._video.create().push_url
                 except Exception as exc:
@@ -126,6 +156,7 @@ class CameraControl:
     def stop(self) -> None:
         """Bring the pipeline down, then archive its ingress in Lattice."""
         with self._transition_lock, self._transitioning():
+            self._ensure_open()
             self._pipeline_stop()
             self._set_desired_on(False)
             if self._video is not None:
@@ -157,10 +188,13 @@ class CameraControl:
         """Best-effort cleanup at service exit: stop the pipeline and archive the ingress.
 
         Does not publish; the caller publishes the final offline entity once
-        everything else is down.
+        everything else is down. Closes the control first so a transition
+        queued behind this one fails instead of undoing the cleanup.
         """
+        with self._state_lock:
+            self._closed = True
         with self._transition_lock, self._transitioning():
-            if self.snapshot().desired_on:
+            if self._desired():
                 try:
                     self._pipeline_stop()
                 except CameraControlError as exc:
@@ -173,9 +207,19 @@ class CameraControl:
     def _video_id(self) -> str | None:
         return self._video.video_id if self._video is not None else None
 
+    def _desired(self) -> bool:
+        with self._state_lock:
+            return self._desired_on
+
     def _set_desired_on(self, value: bool) -> None:
         with self._state_lock:
             self._desired_on = value
+
+    def _ensure_open(self) -> None:
+        with self._state_lock:
+            closed = self._closed
+        if closed:
+            raise CameraControlError("service is shutting down; transition refused")
 
     @contextmanager
     def _transitioning(self) -> Iterator[None]:

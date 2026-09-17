@@ -12,8 +12,16 @@ Lifecycle invariants (see the Lattice "Integrate an agent" guide):
 
 * Report ``EXECUTING`` as soon as a task is picked up.
 * Every status update carries a strictly increasing ``status_version``. The
-  first update uses the version delivered with the task plus one.
+  counter starts from the version delivered with the task, is advanced to the
+  version Lattice returns after every update, and is re-read (``GetTask``)
+  when a cancel or complete request arrives, because the server bumps the
+  version for those and the request carries only the task id.
 * Terminal states are final; a task never stays in ``EXECUTING``.
+* Start/Stop are not interruptible. A cancel that arrives while the action
+  runs is honoured afterwards: the task ends ``DONE_NOT_OK`` with
+  ``CANCELLED`` even though the action completed, so the operator's cancel
+  always reaches a terminal state. A complete request marks the task terminal
+  locally; the server already considers it done, so nothing more is sent.
 * The stream is long-lived and reconnected on any error, with exponential
   backoff plus jitter (``reconnect_base_seconds`` doubling up to
   ``reconnect_cap_seconds``) so a flapping endpoint is not hammered. The
@@ -80,10 +88,22 @@ class _ActiveTask:
         self.task_id = task.version.task_id
         self.definition_version = task.version.definition_version
         # Lattice ignores updates whose version is not greater than what it
-        # already holds, so continue from the version the task arrived with.
+        # already holds, so continue from the version the task arrived with
+        # and track every higher version the server reports back.
         self.status_version = task.version.status_version
         self.cancel = threading.Event()
         self.terminal = False
+        # Guards status_version and terminal: the worker thread updates them,
+        # the stream thread resynchronises them on cancel/complete.
+        self.lock = threading.Lock()
+
+    def observe_version(self, status_version: int | None) -> None:
+        """Advance the counter to a version the server reported, never back."""
+        if status_version is None:
+            return
+        with self.lock:
+            if status_version > self.status_version:
+                self.status_version = status_version
 
 
 class TaskHandler:
@@ -243,7 +263,7 @@ class TaskHandler:
         elif request.field == "cancel_request":
             self._on_cancel(request.value.task_id)
         elif request.field == "complete_request":
-            logger.info("complete request received", task_id=request.value.task_id)
+            self._on_complete(request.value.task_id)
         else:
             logger.warning("unknown task stream request", field=request.field)
 
@@ -298,7 +318,17 @@ class TaskHandler:
                 return
 
             action()
-            self._update(active, Status.DONE_OK)
+            if active.cancel.is_set():
+                # The action is not interruptible and has already taken
+                # effect; the operator's cancel still gets its terminal state.
+                self._update(
+                    active,
+                    Status.DONE_NOT_OK,
+                    error="cancelled by operator; the action had already completed",
+                    error_code=ErrorCode.CANCELLED,
+                )
+            else:
+                self._update(active, Status.DONE_OK)
         except Exception as exc:
             logger.error("task failed", task_id=active.task_id, task=name, error=str(exc))
             if not active.terminal:
@@ -323,7 +353,35 @@ class TaskHandler:
             logger.info("cancel request for a task that is not in progress", task_id=task_id)
             return
         logger.info("cancel requested", task_id=task_id)
+        # The server has moved the task to a new status version; learn it so
+        # the worker's terminal update is still strictly greater.
+        self._resync_version(active)
         active.cancel.set()
+
+    def _on_complete(self, task_id: str) -> None:
+        with self._active_lock:
+            active = self._active.get(task_id)
+        if active is None:
+            logger.info("complete request for a task that is not in progress", task_id=task_id)
+            return
+        logger.info("complete request received; task is terminal server-side", task_id=task_id)
+        self._resync_version(active)
+        with active.lock:
+            active.terminal = True
+
+    def _resync_version(self, active: _ActiveTask) -> None:
+        """Re-read the task and adopt a higher server-side status version."""
+        try:
+            task = self._client.tasks.get_task(active.task_id, timeout_ms=UPDATE_STATUS_TIMEOUT_MS)
+        except Exception as exc:
+            logger.warning(
+                "could not re-read task version; continuing with the local counter",
+                task_id=active.task_id,
+                error=str(exc),
+            )
+            return
+        version = task.version if task is not None else None
+        active.observe_version(version.status_version if version is not None else None)
 
     def _update(
         self,
@@ -333,25 +391,31 @@ class TaskHandler:
         error: str | None = None,
         error_code: ErrorCode = ErrorCode.FAILED,
     ) -> None:
-        if active.terminal:
-            return
-        active.status_version += 1
-        self._client.tasks.update_task_status(
+        with active.lock:
+            if active.terminal:
+                return
+            active.status_version += 1
+            status_version = active.status_version
+        # The RPC runs outside the task lock; a concurrent resync can only
+        # raise the counter, which the max() below preserves.
+        returned = self._client.tasks.update_task_status(
             task_id=active.task_id,
             definition_version=active.definition_version,
-            status_version=active.status_version,
+            status_version=status_version,
             status=status,
             agent_entity_id=self._entity_id,
             error_message=error,
             error_code=error_code,
             timeout_ms=UPDATE_STATUS_TIMEOUT_MS,
         )
+        active.observe_version(getattr(returned, "status_version", None))
         if status in (Status.DONE_OK, Status.DONE_NOT_OK):
-            active.terminal = True
+            with active.lock:
+                active.terminal = True
         logger.info(
             "task status updated",
             task_id=active.task_id,
             status=status.name,
-            status_version=active.status_version,
+            status_version=status_version,
             error=error,
         )

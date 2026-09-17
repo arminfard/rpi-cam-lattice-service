@@ -57,3 +57,38 @@ def test_empty_path_is_in_memory_only(tmp_path, monkeypatch):
     store.set("k", 1)
     assert store.get("k") == 1
     assert list(tmp_path.iterdir()) == []
+
+
+def test_unwritable_path_keeps_state_in_memory(tmp_path, caplog):
+    # The parent is a regular file, so the directory can never be created and
+    # every flush fails with an OSError. The daemon must keep running.
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory")
+    store = StateStore(str(blocker / "state.json"))
+
+    with caplog.at_level("WARNING"):
+        store.set("ingress", {"video_id": "abc"})
+        store.set("created_time", "t")
+        store.delete("ingress")
+
+    assert store.get("created_time") == "t"
+    assert store.get("ingress") is None
+    warnings = [r for r in caplog.records if "state file could not be written" in r.getMessage()]
+    assert len(warnings) == 1  # same error repeated: warned once
+
+
+def test_flush_error_is_logged_again_when_it_changes(tmp_path, caplog, monkeypatch):
+    store = StateStore(str(tmp_path / "state.json"))
+    errors = iter([OSError("disk full"), OSError("disk full"), OSError("read-only")])
+
+    def failing_replace(src, dst):
+        raise next(errors)
+
+    monkeypatch.setattr("rpi_cam_lattice_service.state.os.replace", failing_replace)
+    with caplog.at_level("WARNING"):
+        store.set("a", 1)
+        store.set("b", 2)
+        store.set("c", 3)
+    messages = [r.getMessage() for r in caplog.records]
+    assert messages.count("state file could not be written; keeping state in memory only") == 2
+    assert store.get("c") == 3
