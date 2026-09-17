@@ -7,8 +7,7 @@
 # `sudo systemctl restart mediamtx-srt` (TASK_START_COMMAND); a Stop task runs
 # `sudo systemctl stop mediamtx-srt` (TASK_STOP_COMMAND).
 #
-# Why not enable it at boot: an earlier version was WantedBy=multi-user.target
-# and failed repeatedly at every boot. `After=` only orders against the daemon
+# `After=` only orders against the daemon
 # *process* starting, not against the daemon having written srt_target.env
 # (which only exists once a Start task has been handled), so the mandatory
 # EnvironmentFile= was missing and the unit went into a restart loop.
@@ -18,9 +17,8 @@
 #   sudo systemctl daemon-reload
 # If a previous version was enabled: sudo systemctl disable --now mediamtx-srt
 #
-# PLACEHOLDER to edit before installing: the project path
-# (/home/airhead/workspace/rpi-cam-lattice-service). Keep the srt_target.env
-# path in sync with SRT_TARGET_FILE in .env.
+# PLACEHOLDER: @INSTALL_DIR@ is the checkout path; `make install-units`
+# renders it. Keep the srt_target.env path in sync with SRT_TARGET_FILE in .env.
 
 [Unit]
 Description=MediaMTX SRT Push Server (Raspberry Pi Camera)
@@ -32,19 +30,19 @@ Wants=network-online.target
 # *skipped* (condition failed, unit stays inactive) instead of *failing* and
 # looping through Restart=. The daemon always writes the file before it
 # restarts this unit, so in normal operation the condition is always met.
-ConditionPathExists=/home/airhead/workspace/rpi-cam-lattice-service/srt_target.env
+ConditionPathExists=@INSTALL_DIR@/srt_target.env
 
 [Service]
 Type=simple
-WorkingDirectory=/home/airhead/workspace/rpi-cam-lattice-service
+WorkingDirectory=@INSTALL_DIR@
 # The SRT push destination, written by rpi-cam-lattice-service as
 # SRT_TARGET=<url>. It changes on every Start task (a new Lattice ingress each
 # time), which is why the daemon *restarts* this unit rather than starting it.
 # The leading "-" makes a missing file non-fatal (ConditionPathExists above
 # already prevents that case; the dash keeps the unit loadable and
 # `systemd-analyze verify` quiet when the file does not exist).
-EnvironmentFile=-/home/airhead/workspace/rpi-cam-lattice-service/srt_target.env
-ExecStart=/home/airhead/workspace/rpi-cam-lattice-service/mediamtx /home/airhead/workspace/rpi-cam-lattice-service/mediamtx.yml
+EnvironmentFile=-@INSTALL_DIR@/srt_target.env
+ExecStart=@INSTALL_DIR@/mediamtx @INSTALL_DIR@/mediamtx.yml
 # Restart=always covers MediaMTX crashes *while streaming*; it does not apply
 # to a start skipped by ConditionPathExists, and `systemctl stop` (the Stop
 # task) also clears it.

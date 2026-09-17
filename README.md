@@ -114,7 +114,7 @@ task-def/            custom task definitions (Buf module for the Schema Registry
   buf.yaml
   anduril/sample_app_rpi_cam/camera/v1alpha/camera_tasks.proto   Start {} and Stop {}
 deploy/
-  systemd/rpi-cam-lattice-service.service   the daemon (User=airhead placeholder)
+  systemd/rpi-cam-lattice-service.service   the daemon (User=@SERVICE_USER@, rendered at install)
   systemd/mediamtx-srt.service              MediaMTX, no [Install] section on purpose
   sudoers.d/rpi-cam-lattice-service         lets the service user restart/stop MediaMTX
 mediamtx.yml         MediaMTX config: rpiCamera -> ffmpeg -> SRT, control API on localhost
@@ -414,13 +414,15 @@ same steps on Python 3.11 and 3.12.
 
 ## Deploy (systemd on the Pi)
 
-The files under `deploy/` carry placeholders: the project path
-(`/home/airhead/workspace/rpi-cam-lattice-service`) and the service account
-(`User=airhead` / `Group=airhead` in the daemon unit, `airhead` in the sudoers
-rule). Edit them for your install, then:
+The files under `deploy/` are templates with two placeholders: `@INSTALL_DIR@`
+(the checkout path) and `@SERVICE_USER@` (the unprivileged account that runs
+the daemon and owns the checkout). `make install-units` renders them into
+`build/deploy/` and installs the result. The defaults are the current directory
+and the invoking user; override either on the command line:
 
 ```bash
-make install-units                                    # visudo -c, copies both units + the sudoers rule, daemon-reload
+make install-units                                    # renders, visudo -c, installs both units + the sudoers rule, daemon-reload
+make install-units SERVICE_USER=rpi-cam INSTALL_DIR=/opt/rpi-cam-lattice-service   # explicit values
 sudo systemctl enable --now rpi-cam-lattice-service   # recovers state, creates the ingress, starts MediaMTX
 journalctl -u rpi-cam-lattice-service -u mediamtx-srt -f
 ```
@@ -430,7 +432,7 @@ MediaMTX, so the sudoers drop-in lets the service account run exactly those
 two commands without a password:
 
 ```
-airhead ALL=(root) NOPASSWD: /usr/bin/systemctl restart mediamtx-srt, /usr/bin/systemctl stop mediamtx-srt
+@SERVICE_USER@ ALL=(root) NOPASSWD: /usr/bin/systemctl restart mediamtx-srt, /usr/bin/systemctl stop mediamtx-srt
 ```
 
 Set `TASK_START_COMMAND=sudo systemctl restart mediamtx-srt` and
@@ -451,7 +453,7 @@ Applying this version over an older install that ran as root and enabled the
 MediaMTX unit:
 
 ```bash
-sudo chown airhead:airhead srt_target.env     # or delete it; an earlier root run left it root-owned
+sudo chown "$USER:$USER" srt_target.env     # or delete it; an earlier root run left it root-owned
 sudo systemctl disable --now mediamtx-srt     # the daemon starts it from now on
 make install                                  # rebuild .venv with the pinned SDK
 make install-units                            # new units + sudoers rule, daemon-reload

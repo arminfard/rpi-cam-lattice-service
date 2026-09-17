@@ -9,7 +9,7 @@ SUDOERS_DIR := /etc/sudoers.d
 UNITS       := deploy/systemd/rpi-cam-lattice-service.service deploy/systemd/mediamtx-srt.service
 SUDOERS     := deploy/sudoers.d/rpi-cam-lattice-service
 
-.PHONY: install test lint typecheck check install-units
+.PHONY: install test lint typecheck check install-units render-units
 
 install:
 	./scripts/install.sh
@@ -25,18 +25,37 @@ typecheck:
 
 check: lint typecheck test
 
-# Copies the two systemd units and the sudoers rule into place (needs sudo)
-# and reloads systemd. Edit the placeholders (project path, User=/Group=,
-# sudoers account) in the files under deploy/ first. Does not enable or start
+# The files under deploy/ are templates. Two placeholders are rendered here:
+#   @INSTALL_DIR@   the checkout path         (default: this directory)
+#   @SERVICE_USER@  the unprivileged account  (default: the invoking user)
+# Override on the command line, e.g.
+#   make install-units SERVICE_USER=rpi-cam INSTALL_DIR=/opt/rpi-cam-lattice-service
+INSTALL_DIR  ?= $(CURDIR)
+SERVICE_USER ?= $(shell id -un)
+RENDER_DIR   := build
+RENDERED_UNITS   := $(addprefix $(RENDER_DIR)/,$(UNITS))
+RENDERED_SUDOERS := $(RENDER_DIR)/$(SUDOERS)
+
+# Renders one template into build/deploy/ with the placeholders substituted.
+$(RENDER_DIR)/%: %
+	@mkdir -p $(dir $@)
+	sed -e 's|@INSTALL_DIR@|$(INSTALL_DIR)|g' -e 's|@SERVICE_USER@|$(SERVICE_USER)|g' $< > $@
+
+.PHONY: render-units
+render-units: $(RENDERED_UNITS) $(RENDERED_SUDOERS)
+	@echo "Rendered into $(RENDER_DIR)/ with INSTALL_DIR=$(INSTALL_DIR) SERVICE_USER=$(SERVICE_USER)"
+
+# Renders the templates, validates the sudoers rule, installs the two units
+# and the rule (needs sudo) and reloads systemd. Does not enable or start
 # anything: `sudo systemctl enable --now rpi-cam-lattice-service` afterwards.
 # mediamtx-srt must NOT be enabled; the daemon starts it on a Start task.
-install-units:
-	@echo "Validating $(SUDOERS)"
-	visudo -cf $(SUDOERS)
-	@echo "Installing units to $(SYSTEMD_DIR): $(UNITS)"
-	sudo install -m 0644 $(UNITS) $(SYSTEMD_DIR)/
+install-units: render-units
+	@echo "Validating $(RENDERED_SUDOERS)"
+	visudo -cf $(RENDERED_SUDOERS)
+	@echo "Installing units to $(SYSTEMD_DIR): $(RENDERED_UNITS)"
+	sudo install -m 0644 $(RENDERED_UNITS) $(SYSTEMD_DIR)/
 	@echo "Installing sudoers rule to $(SUDOERS_DIR)/rpi-cam-lattice-service (mode 0440)"
-	sudo install -m 0440 -o root -g root $(SUDOERS) $(SUDOERS_DIR)/rpi-cam-lattice-service
+	sudo install -m 0440 -o root -g root $(RENDERED_SUDOERS) $(SUDOERS_DIR)/rpi-cam-lattice-service
 	@echo "Reloading systemd"
 	sudo systemctl daemon-reload
 	@echo "Done. If mediamtx-srt was enabled by an older install: sudo systemctl disable --now mediamtx-srt"

@@ -5,10 +5,12 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now rpi-cam-lattice-service
 #
-# PLACEHOLDERS to edit before installing: every occurrence of the project path
-# (/home/airhead/workspace/rpi-cam-lattice-service) and of the service account
-# (User=/Group= airhead). The account must own the project directory (it writes
-# srt_target.env and state.json there) and must match the sudoers rule in
+# PLACEHOLDERS: @INSTALL_DIR@ is the checkout path and @SERVICE_USER@ the
+# unprivileged account that runs the daemon. `make install-units` renders both
+# (defaults: the current directory and the invoking user; override with
+# `make install-units INSTALL_DIR=/opt/rpi-cam-lattice-service SERVICE_USER=rpi-cam`).
+# The account must own the checkout (the daemon writes srt_target.env and
+# state.json there) and must match the sudoers rule in
 # deploy/sudoers.d/rpi-cam-lattice-service.
 
 [Unit]
@@ -21,12 +23,12 @@ Type=simple
 # Run unprivileged. The daemon only needs to reach Lattice, write two small
 # files in its project directory and call `sudo systemctl restart|stop
 # mediamtx-srt`, which the sudoers rule allows without a password.
-User=airhead
-Group=airhead
-WorkingDirectory=/home/airhead/workspace/rpi-cam-lattice-service
+User=@SERVICE_USER@
+Group=@SERVICE_USER@
+WorkingDirectory=@INSTALL_DIR@
 # Runs the console script from the project's virtualenv. --config points at the
 # .env file; alternatively drop the file and use EnvironmentFile= below.
-ExecStart=/home/airhead/workspace/rpi-cam-lattice-service/.venv/bin/rpi-cam-lattice-service --config /home/airhead/workspace/rpi-cam-lattice-service/.env
+ExecStart=@INSTALL_DIR@/.venv/bin/rpi-cam-lattice-service --config @INSTALL_DIR@/.env
 # Or inject credentials/config via systemd instead of a .env file:
 # EnvironmentFile=/etc/rpi-cam-lattice-service/env
 
