@@ -445,6 +445,10 @@ def test_pipeline_mixed_ready_but_not_pushing():
     )
     assert camera.status is Status.HEALTHY
     assert stream.status is Status.NOT_READY
+    # The API answered (ready is known), so this is not an API outage.
+    assert stream.messages == (
+        "SRT push not yet confirmed, awaiting next sample: ready, readers=1, no byte baseline yet",
+    )
 
 
 def test_pipeline_probe_error_marks_both_not_ready():

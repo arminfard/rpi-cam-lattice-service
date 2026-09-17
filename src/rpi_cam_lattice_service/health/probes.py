@@ -419,13 +419,14 @@ class PipelineProbe(ProbeBase):
         now: datetime,
     ) -> ComponentReport:
         if observed is None:
-            return _report(
-                component_id,
-                name,
-                Status.NOT_READY,
-                [f"MediaMTX API unavailable: {status.detail}"],
-                now,
-            )
+            # Two different "unknown"s: the API could not be reached at all
+            # (ready is None too), or it answered but this signal needs a
+            # second sample (the pusher's byte counter has no baseline yet).
+            if status.ready is None:
+                message = f"MediaMTX API unavailable: {status.detail}"
+            else:
+                message = f"{what} not yet confirmed, awaiting next sample: {status.detail}"
+            return _report(component_id, name, Status.NOT_READY, [message], now)
         if observed:
             return _report(component_id, name, Status.HEALTHY, [status.detail], now)
         return _report(component_id, name, Status.FAIL, [f"{what} down: {status.detail}"], now)
