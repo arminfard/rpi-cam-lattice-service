@@ -121,4 +121,3 @@ Health is the worked example. Each step lives in `health/`:
 contributors.append(HealthContributor(sampler.snapshot))
 workers.append(("health", sampler.run))
 ```
-
