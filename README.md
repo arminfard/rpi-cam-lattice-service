@@ -345,7 +345,7 @@ On the Pi, use the systemd units (see [Deploy](#deploy-systemd-on-the-pi)).
 For a manual run:
 
 ```bash
-rpi-cam-lattice-service --config .env [--debug]   # or: python -m rpi_cam_lattice_service
+.venv/bin/rpi-cam-lattice-service --config .env [--debug]   # or: .venv/bin/python -m rpi_cam_lattice_service
 ```
 
 ## Verify (live round-trip)
@@ -357,8 +357,8 @@ sensor going `OFF` and back to `OPERATIONAL`. The health output is what to
 check after deploying this version.
 
 ```bash
-rpi-cam-lattice-service --config .env                        # terminal 1 (or the systemd unit)
-python scripts/verify.py --config .env                       # terminal 2; --entity-id overrides ENTITY_ID
+.venv/bin/rpi-cam-lattice-service --config .env              # terminal 1 (or the systemd unit)
+.venv/bin/python scripts/verify.py --config .env             # terminal 2; --entity-id overrides ENTITY_ID
 ```
 
 Expect `is_live: True`, a video id under `Media`, the sensor state, the two
@@ -371,9 +371,9 @@ To prove the task loop, dispatch a task from a separate process and watch it
 reach a terminal state:
 
 ```bash
-python scripts/send_task.py --config .env Stop    # expect SENT -> EXECUTING -> DONE_OK
-python scripts/verify.py --config .env            # sensor state: OFF, no video id, stream: NOT_READY
-python scripts/send_task.py --config .env Start   # sensor state back to OPERATIONAL, new video id
+.venv/bin/python scripts/send_task.py --config .env Stop    # expect SENT -> EXECUTING -> DONE_OK
+.venv/bin/python scripts/verify.py --config .env            # sensor state: OFF, no video id, stream: NOT_READY
+.venv/bin/python scripts/send_task.py --config .env Start   # sensor state back to OPERATIONAL, new video id
 ```
 
 `send_task.py` accepts `--entity-id` and `--wait <seconds>` (default 20).
@@ -437,5 +437,5 @@ sudo systemctl disable --now mediamtx-srt     # the daemon starts it from now on
 make install                                  # rebuild .venv with the pinned SDK
 make install-units                            # new units + sudoers rule, daemon-reload
 sudo systemctl restart rpi-cam-lattice-service
-python scripts/verify.py --config .env        # check the health block
+.venv/bin/python scripts/verify.py --config .env   # check the health block
 ```
