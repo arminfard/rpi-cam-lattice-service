@@ -82,9 +82,28 @@ The daemon runs unprivileged and may run exactly two commands through sudo:
 enable `mediamtx-srt`; it has no `[Install]` section on purpose, because only
 the daemon knows when a valid `srt_target.env` exists.
 
-Upgrading a Pi that ran an older version as root: `sudo chown "$USER:$USER"
-srt_target.env`, `sudo systemctl disable --now mediamtx-srt`, then the three
-commands above.
+## Upgrading
+
+On a Pi that already runs the integration, pull the new version and:
+
+```bash
+make install                                       # rebuild .venv against the pinned SDK
+make install-units                                 # re-render and install units + sudoers rule
+sudo systemctl restart rpi-cam-lattice-service     # stops MediaMTX, archives the ingress, starts fresh
+.venv/bin/python scripts/verify.py --config .env   # confirm the entity reads back as expected
+```
+
+The daemon persists its ingress record in `state.json`, so an ingress left by
+the old process is archived at startup. Check `.env.example` after an upgrade
+for new keys; they all have defaults, so an old `.env` keeps working.
+
+If the previous install ran the daemon as root or had `mediamtx-srt` enabled,
+run these first:
+
+```bash
+sudo chown "$USER:$USER" srt_target.env      # root-owned file from the old run
+sudo systemctl disable --now mediamtx-srt    # the daemon starts it from now on
+```
 
 ## Adding a component
 
