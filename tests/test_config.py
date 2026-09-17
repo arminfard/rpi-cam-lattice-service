@@ -60,7 +60,7 @@ def _valid() -> Config:
 
 def test_defaults_when_nothing_is_set(tmp_path):
     cfg = load(str(tmp_path / "missing.env"))
-    assert cfg.entity_id == "rpi-cam-01"
+    assert cfg.entity_id == ""  # resolved at startup, see entity/identity.py
     assert cfg.entity_name == "RPi Camera"
     assert cfg.camera_latitude == 49.65108
     assert cfg.camera_longitude == 11.79045
@@ -127,7 +127,7 @@ def test_empty_values_fall_back_to_defaults(tmp_path, monkeypatch):
     cfg = load(path)
     assert cfg.camera_latitude == 49.65108
     assert cfg.video_enabled is True
-    assert cfg.entity_id == "rpi-cam-01"
+    assert cfg.entity_id == ""  # resolved at startup, see entity/identity.py
     assert cfg.task_heartbeat_interval_ms == 30000
 
 
@@ -369,3 +369,14 @@ def test_identity_keys_load_with_defaults(tmp_path, monkeypatch):
         "cam-7",
         "REGISTRATION_ID",
     )
+
+
+def test_entity_id_must_be_a_uuid_when_set():
+    cfg = _valid()
+    cfg.entity_id = "rpi-cam-01"
+    with pytest.raises(ConfigError, match="ENTITY_ID must be a UUID"):
+        cfg.validate()
+    cfg.entity_id = "6BA7B810-9DAD-11D1-80B4-00C04FD430C8"
+    cfg.validate()
+    cfg.entity_id = ""
+    cfg.validate()

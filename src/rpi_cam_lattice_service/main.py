@@ -39,6 +39,7 @@ from .entity import (
     TaskCatalogContributor,
 )
 from .entity.base import validate_identity
+from .entity.identity import resolve_entity_id
 from .health import (
     HealthContributor,
     HealthSampler,
@@ -234,6 +235,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     state = StateStore(config.state_file)
+    # A UUID that survives restarts: ENTITY_ID, else the previous run's id,
+    # else one derived from the board serial (entity/identity.py).
+    config.entity_id = resolve_entity_id(config, state, pi_serial_number())
     pipeline = _build_pipeline(config)
     control = _build_control(client, config, state, pipeline, logger)
     service: Service | None = None

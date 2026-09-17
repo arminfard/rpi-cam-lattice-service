@@ -3,11 +3,11 @@ where the Lattice endpoint is reachable.
 
 It constructs its own client and reads back the camera entity the daemon
 publishes, proving the publish -> read-back round-trip (the definition of done).
-The camera uses a stable entity_id (config ENTITY_ID), so --entity-id defaults
+The camera's entity id is resolved exactly as the daemon does it, so --entity-id defaults
 to it.
 
 Usage:
-    python scripts/verify.py --config .env [--entity-id rpi-cam-01]
+    python scripts/verify.py --config .env [--entity-id <uuid>]
 """
 
 from __future__ import annotations
@@ -19,7 +19,10 @@ import sys
 sys.path.insert(0, "src")
 
 from rpi_cam_lattice_service import config as config_module  # noqa: E402
+from rpi_cam_lattice_service.camera.source import pi_serial_number  # noqa: E402
+from rpi_cam_lattice_service.entity.identity import resolve_entity_id  # noqa: E402
 from rpi_cam_lattice_service.lattice import LatticeClient  # noqa: E402
+from rpi_cam_lattice_service.state import StateStore  # noqa: E402
 
 
 def _print_health(health) -> None:
@@ -47,7 +50,11 @@ def main() -> int:
 
     config = config_module.load(args.config)
     config.validate()
-    entity_id = args.entity_id or config.entity_id
+    # Same resolution as the daemon: ENTITY_ID, else state.json, else the
+    # id derived from this board's serial.
+    entity_id = args.entity_id or resolve_entity_id(
+        config, StateStore(config.state_file), pi_serial_number()
+    )
 
     with LatticeClient(config) as client:
         response = client.entities.get_entity(entity_id, timeout_ms=30000)

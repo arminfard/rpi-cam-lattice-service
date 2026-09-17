@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 import os
+import uuid
 from dataclasses import dataclass, field
 
 from dotenv import dotenv_values
@@ -88,7 +89,11 @@ class Config:
 
     # --- Camera entity ---
     # Stable entity id (a fixed camera keeps its identity across restarts).
-    entity_id: str = "rpi-cam-01"
+    # Stable UUID for the asset. Empty = resolved at startup from the previous
+    # run's state.json, else derived from the Pi's hardware serial (see
+    # ``entity/identity.py``). When set it must be a UUID; Lattice rejects
+    # other asset ids.
+    entity_id: str = ""
     entity_name: str = "RPi Camera"
     platform_type: str = "Camera"
     integration_name: str = "rpi-cam-lattice-service"
@@ -178,6 +183,14 @@ class Config:
                 "authentication is required: set ENVIRONMENT_TOKEN, "
                 "or both CLIENT_ID and CLIENT_SECRET"
             )
+        if self.entity_id:
+            try:
+                uuid.UUID(self.entity_id)
+            except ValueError:
+                raise ConfigError(
+                    f"ENTITY_ID must be a UUID (Lattice validates asset ids), got "
+                    f"{self.entity_id!r}; leave it empty to derive a stable one"
+                ) from None
         if self.ca_cert_path and not os.path.exists(self.ca_cert_path):
             raise ConfigError(f"LATTICE_CA_CERT_PATH does not exist: {self.ca_cert_path}")
         if not -90.0 <= self.camera_latitude <= 90.0:

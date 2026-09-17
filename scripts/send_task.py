@@ -14,7 +14,7 @@ functions over the public ``client.tasks.stub`` and ``client.auth``.
 
 Usage:
     python scripts/send_task.py --config .env Stop
-    python scripts/send_task.py --config .env Start [--entity-id rpi-cam-01] [--wait 20]
+    python scripts/send_task.py --config .env Start [--entity-id <uuid>] [--wait 20]
 """
 
 from __future__ import annotations
@@ -41,7 +41,10 @@ from protobuf import Oneof  # noqa: E402
 from protobuf.wkt import any_pb  # noqa: E402
 
 from rpi_cam_lattice_service import config as config_module  # noqa: E402
+from rpi_cam_lattice_service.camera.source import pi_serial_number  # noqa: E402
+from rpi_cam_lattice_service.entity.identity import resolve_entity_id  # noqa: E402
 from rpi_cam_lattice_service.lattice import LatticeClient  # noqa: E402
+from rpi_cam_lattice_service.state import StateStore  # noqa: E402
 from rpi_cam_lattice_service.tasking.definitions import (  # noqa: E402
     SUPPORTED_TASKS,
     task_type_url,
@@ -105,7 +108,11 @@ def main() -> int:
 
     config = config_module.load(args.config)
     config.validate()
-    entity_id = args.entity_id or config.entity_id
+    # Same resolution as the daemon: ENTITY_ID, else state.json, else the
+    # id derived from this board's serial.
+    entity_id = args.entity_id or resolve_entity_id(
+        config, StateStore(config.state_file), pi_serial_number()
+    )
     type_url = task_type_url(config.task_package, args.task)
 
     with LatticeClient(config) as client:
