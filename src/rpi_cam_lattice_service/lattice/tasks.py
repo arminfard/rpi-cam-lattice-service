@@ -7,9 +7,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from connectrpc.protocol import ProtocolType
-from protobuf import Oneof
-
 from anduril.taskmanager.v1.task_manager_api_pub_connect import (
     TaskManagerAPIClientSync,
 )
@@ -29,6 +26,8 @@ from anduril.taskmanager.v1.task_pub_pb import (
     TaskStatus,
     TaskVersion,
 )
+from connectrpc.protocol import ProtocolType
+from protobuf import Oneof
 
 from .auth import AuthProvider
 
@@ -53,9 +52,7 @@ class TaskClient:
             agent_selector=Oneof("entity_ids", EntityIds(entity_ids=[entity_id])),
             heartbeat_interval_ms=heartbeat_interval_ms,
         )
-        return self.stub.listen_as_agent(
-            request, headers=self._auth.headers(), timeout_ms=None
-        )
+        return self.stub.listen_as_agent(request, headers=self._auth.headers(), timeout_ms=None)
 
     def update_task_status(
         self,

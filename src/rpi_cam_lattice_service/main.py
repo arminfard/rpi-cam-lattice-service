@@ -1,26 +1,51 @@
-"""CLI entry point.
+"""CLI entry point: configuration, wiring, and the run/shutdown sequence.
 
-Loads config, builds the Lattice client, brings the camera stream up (registers
-an SRT video ingress with Lattice's VideoManager so MediaMTX has somewhere to
-push and the entity can advertise the video id), then runs the publishing
-service and the task handler for the camera entity. On exit the stream is
-stopped and its ingress archived.
+This module is deliberately *only* wiring. Every feature lives in its own
+package and is plugged in here:
+
+* ``lattice``  — the client (transport, auth, one thin client per API)
+* ``camera``   — the media pipeline, the Start/Stop control, the video ingress
+* ``entity``   — the composition seam: a base entity plus one *contributor*
+                 per component (location, sensors, media, task catalog, health)
+* ``tasking``  — the agent stream that executes Start/Stop
+* ``health``   — probes sampled on their own cadence, published as ``Health``
+
+Adding a feature means adding a package and a few lines in ``_build_*`` below,
+never changing the publish loop or the other packages.
+
+Run sequence: recover any ingress a previous process left behind, bring the
+stream up (best-effort), run until a signal, then stop the stream, archive the
+ingress, and publish one final entity marked offline.
 """
 
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
 
 from . import config as config_module
 from .camera.control import CameraControl
-from .camera.entity import build_camera_publish_request
 from .camera.ingress import VideoIngress
+from .camera.pipeline import CommandPipeline, MediaMtxStatusProbe
 from .camera.source import CameraSource
 from .config import Config, ConfigError
+from .entity import (
+    CameraObservation,
+    EntityBuilder,
+    EntityContributor,
+    LocationContributor,
+    MediaContributor,
+    SensorsContributor,
+    StaticHealthContributor,
+    TaskCatalogContributor,
+)
 from .lattice import LatticeClient
 from .logging_setup import configure, get_logger
 from .service import Service
+from .state import StateStore
 from .tasking.handler import TaskHandler
+
+CREATED_TIME_KEY = "created_time"
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -35,24 +60,76 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _build_control(client: LatticeClient, config: Config, logger) -> CameraControl:
+def _created_time(state: StateStore) -> datetime:
+    """A stable-id asset keeps one creation time across restarts."""
+    raw = state.get(CREATED_TIME_KEY)
+    if isinstance(raw, str):
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            pass
+    created = datetime.now(UTC)
+    state.set(CREATED_TIME_KEY, created.isoformat())
+    return created
+
+
+def _build_pipeline(config: Config) -> CommandPipeline:
+    """The media pipeline: shell commands to start/stop MediaMTX, observed via its API."""
+    probe = MediaMtxStatusProbe(api_url=config.mediamtx_api_url, path=config.mediamtx_path)
+    return CommandPipeline(
+        start_command=config.task_start_command,
+        stop_command=config.task_stop_command,
+        probe=probe,
+    )
+
+
+def _build_control(
+    client: LatticeClient, config: Config, state: StateStore, pipeline: CommandPipeline, logger
+) -> CameraControl:
     """Wire the task-driven camera control, with the video ingress when enabled."""
     video = None
     if config.video_enabled:
         video = VideoIngress(
             client,
-            entity_id=config.entity_id,
             title=config.video_title or f"{config.entity_name} (SRT)",
             passphrase=config.srt_passphrase,
             srt_target_file=config.srt_target_file,
+            state=state,
         )
     else:
         logger.info("video ingress disabled (VIDEO_ENABLED=false)")
-    return CameraControl(
-        start_command=config.task_start_command,
-        stop_command=config.task_stop_command,
-        streaming=False,
-        video=video,
+    return CameraControl(pipeline=pipeline, video=video)
+
+
+def _build_entity_builder(
+    config: Config,
+    *,
+    created_time: datetime,
+    source: CameraSource,
+    control: CameraControl,
+    pipeline: CommandPipeline,
+    task_handler: TaskHandler | None,
+) -> EntityBuilder:
+    """Compose the entity: identity floor plus one contributor per component."""
+
+    def observe() -> CameraObservation:
+        snapshot = control.snapshot()
+        ready = pipeline.status().ready if snapshot.desired_on else None
+        return CameraObservation(desired_on=snapshot.desired_on, ready=ready)
+
+    contributors: list[EntityContributor] = [
+        LocationContributor(source),
+        SensorsContributor(observe),
+        MediaContributor(lambda: control.snapshot().video_id),
+        StaticHealthContributor(),
+    ]
+    if task_handler is not None:
+        contributors.append(TaskCatalogContributor(task_handler.task_specification_urls))
+    return EntityBuilder(
+        config,
+        entity_id=config.entity_id,
+        created_time=created_time,
+        contributors=contributors,
     )
 
 
@@ -91,7 +168,10 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("failed to initialize Lattice client", error=str(exc))
         return 1
 
-    control = _build_control(client, config, logger)
+    state = StateStore(config.state_file)
+    pipeline = _build_pipeline(config)
+    control = _build_control(client, config, state, pipeline, logger)
+    service: Service | None = None
     try:
         source = CameraSource(
             latitude_degrees=config.camera_latitude,
@@ -110,40 +190,32 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             logger.info("tasking disabled (TASKING_ENABLED=false)")
-        catalog_urls = task_handler.task_specification_urls if task_handler else None
 
-        def request_builder(entity_id, created_time, state):
-            # Read the live control state every tick so Start/Stop show up on
-            # the entity (sensor state, and the Media item only while an
-            # ingress exists).
-            return build_camera_publish_request(
-                config,
-                entity_id,
-                created_time,
-                state,
-                video_id=control.video_id,
-                task_specification_urls=catalog_urls,
-                streaming=control.streaming,
-            )
-
-        service = Service(
+        builder = _build_entity_builder(
             config,
-            client,
+            created_time=_created_time(state),
             source=source,
-            request_builder=request_builder,
-            entity_id=config.entity_id,
+            control=control,
+            pipeline=pipeline,
             task_handler=task_handler,
         )
+        workers = [("tasking", task_handler.run)] if task_handler is not None else []
+        service = Service(config, client, builder=builder, workers=workers)
         # Start/Stop push their outcome to the asset immediately (Media item
         # added or cleared) instead of waiting for the next 1 Hz tick.
         control.on_change = service.publish_now
 
+        # Archive an ingress a crashed predecessor never cleaned up, then
+        # register a fresh one.
+        control.recover()
         _initial_start(control, logger)
         return service.run()
     finally:
         # Leave nothing pushing at, or advertised as, a stream that no longer
-        # has a producer.
+        # has a producer, and tell operators the asset went offline on purpose.
         control.shutdown()
+        if service is not None:
+            service.publish_offline()
         client.close()
 
 

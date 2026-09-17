@@ -47,9 +47,7 @@ class AuthProvider:
         """Return the auth metadata to attach to a Connect request."""
         headers = {"authorization": f"Bearer {self._bearer_token()}"}
         if self._config.sandboxes_token:
-            headers["anduril-sandbox-authorization"] = (
-                f"Bearer {self._config.sandboxes_token}"
-            )
+            headers["anduril-sandbox-authorization"] = f"Bearer {self._config.sandboxes_token}"
         return headers
 
     def _bearer_token(self) -> str:
@@ -77,9 +75,7 @@ class AuthProvider:
 
             if resp.status != 200:
                 # Never log the response body — it may echo credentials.
-                raise AuthError(
-                    f"OAuth token endpoint returned HTTP {resp.status}"
-                )
+                raise AuthError(f"OAuth token endpoint returned HTTP {resp.status}")
 
             data = _parse_json(resp)
             token = data.get("access_token")
@@ -88,9 +84,7 @@ class AuthProvider:
 
             expires_in = float(data.get("expires_in", 3600))
             self._access_token = token
-            self._expiry_monotonic = now + max(
-                0.0, expires_in - _TOKEN_REFRESH_MARGIN_SECONDS
-            )
+            self._expiry_monotonic = now + max(0.0, expires_in - _TOKEN_REFRESH_MARGIN_SECONDS)
             logger.debug("obtained OAuth access token", expires_in=expires_in)
             return token
 

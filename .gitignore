@@ -1,6 +1,8 @@
 # Secrets / local config
 .env
 srt_target.env
+# Daemon state (persisted ingress record; STATE_FILE in .env)
+state.json
 
 # MediaMTX (downloaded binary + logs; run scripts/install-mediamtx.sh)
 mediamtx
@@ -14,3 +16,5 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/

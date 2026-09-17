@@ -1,0 +1,21 @@
+# sudoers drop-in for rpi-cam-lattice-service.
+#
+# The daemon runs unprivileged (User=airhead in the systemd unit) and handles
+# Lattice Start/Stop tasks by running TASK_START_COMMAND / TASK_STOP_COMMAND
+# from .env, which default to:
+#   sudo systemctl restart mediamtx-srt
+#   sudo systemctl stop mediamtx-srt
+# This rule lets that account run exactly those two commands, and nothing
+# else, without a password. Keep the command strings identical to the ones in
+# .env (sudo matches the full command line).
+#
+# PLACEHOLDER: replace "airhead" with the account in User= of
+# deploy/systemd/rpi-cam-lattice-service.service.
+#
+# Validate, then install with mode 0440 (or run `make install-units`):
+#   visudo -cf deploy/sudoers.d/rpi-cam-lattice-service
+#   sudo install -m 0440 -o root -g root deploy/sudoers.d/rpi-cam-lattice-service /etc/sudoers.d/rpi-cam-lattice-service
+# Verify as the service account:
+#   sudo -n -l | grep mediamtx-srt
+
+airhead ALL=(root) NOPASSWD: /usr/bin/systemctl restart mediamtx-srt, /usr/bin/systemctl stop mediamtx-srt

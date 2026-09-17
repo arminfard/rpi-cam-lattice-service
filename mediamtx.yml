@@ -69,7 +69,13 @@ hls: no
 webrtc: no
 srt: no
 
-api: no
+# The control API is enabled on localhost only so rpi-cam-lattice-service can
+# probe the real state of the "cam" path (GET /v3/paths/get/cam: ready flag,
+# attached readers, bytes received) and report observed rather than intended
+# camera health. The authInternalUsers entry above grants the `api` action to
+# 127.0.0.1/::1 only. Keep apiAddress in sync with MEDIAMTX_API_URL in .env.
+api: yes
+apiAddress: 127.0.0.1:9997
 metrics: no
 pprof: no
 playback: no

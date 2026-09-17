@@ -2,33 +2,52 @@
 
 A fake Lattice client records every VideoManager call so the tests can assert
 that Start registers a fresh ingress (new id each time) and writes the SRT
-target *before* MediaMTX is started, and that Stop stops MediaMTX *before*
-archiving the ingress.
+target *before* the pipeline is started, that Stop stops the pipeline *before*
+archiving the ingress, that the ingress record is persisted so a crash can be
+recovered at the next boot, and that reading the state never waits on an RPC.
 """
 
 from __future__ import annotations
 
+import threading
 import uuid
 
 import pytest
 
-from rpi_cam_lattice_service.camera.control import CameraControl, CameraControlError
-from rpi_cam_lattice_service.camera.ingress import VideoIngress
+from rpi_cam_lattice_service.camera.control import (
+    CameraControl,
+    CameraControlError,
+    ControlSnapshot,
+)
+from rpi_cam_lattice_service.camera.ingress import STATE_KEY, VideoIngress
+from rpi_cam_lattice_service.camera.pipeline import CommandPipeline, PipelineError
 from rpi_cam_lattice_service.lattice import SrtIngressInfo
+from rpi_cam_lattice_service.state import StateStore
 
 
-class FakeClient:
+class FakeVideoClient:
+    """Stands in for ``LatticeClient.video``; returns server-shaped ids."""
+
     def __init__(self, *, fail_create=False, fail_delete=False) -> None:
         self.calls: list[tuple] = []
         self.fail_create = fail_create
         self.fail_delete = fail_delete
+        # When set, create_srt_ingress blocks until ``release`` is set so a
+        # test can observe the control state mid-RPC.
+        self.entered: threading.Event | None = None
+        self.release: threading.Event | None = None
 
     def create_srt_ingress(self, *, title, passphrase="", ingress_id=None, timeout_ms=None):
         self.calls.append(("create", ingress_id))
+        if self.entered is not None:
+            self.entered.set()
+        if self.release is not None:
+            assert self.release.wait(5.0), "test never released the fake RPC"
         if self.fail_create:
             raise RuntimeError("VideoManager unavailable")
+        video_id = f"{ingress_id}#1"  # Lattice returns <client id>#<suffix>
         return SrtIngressInfo(
-            video_id=ingress_id, push_url=f"srt://lattice:8890?streamid={ingress_id}", session_id="s"
+            video_id=video_id, push_url=f"srt://lattice:8890?streamid={video_id}", session_id="s"
         )
 
     def delete_srt_ingress(self, ingress_id, *, timeout_ms=None):
@@ -37,18 +56,22 @@ class FakeClient:
             raise RuntimeError("VideoManager unavailable")
 
 
-def _setup(tmp_path, *, start_command="", stop_command="", **client_kwargs):
+class FakeClient:
+    def __init__(self, **kwargs) -> None:
+        self.video = FakeVideoClient(**kwargs)
+
+    @property
+    def calls(self) -> list[tuple]:
+        return self.video.calls
+
+
+def _setup(tmp_path, *, start_command="", stop_command="", with_state=True, **client_kwargs):
     client = FakeClient(**client_kwargs)
     target = tmp_path / "srt_target.env"
-    video = VideoIngress(
-        client, entity_id="rpi-cam-01", title="cam", srt_target_file=str(target)
-    )
-    # Commands that record when they ran, relative to the VideoManager calls,
-    # by appending to a marker file the fake client cannot see; we inspect the
-    # SRT target file's presence at command time instead.
-    control = CameraControl(
-        start_command=start_command, stop_command=stop_command, video=video
-    )
+    state = StateStore(str(tmp_path / "state.json")) if with_state else None
+    video = VideoIngress(client, title="cam", srt_target_file=str(target), state=state)
+    pipeline = CommandPipeline(start_command=start_command, stop_command=stop_command)
+    control = CameraControl(pipeline=pipeline, video=video)
     return client, video, control, target
 
 
@@ -60,35 +83,59 @@ def test_start_registers_fresh_ingress_and_writes_target_before_command(tmp_path
     )
     control.start()
 
-    assert control.streaming is True
+    snap = control.snapshot()
+    assert snap == ControlSnapshot(desired_on=True, video_id=snap.video_id, in_transition=False)
     assert client.calls[0][0] == "create"
     ingress_id = client.calls[0][1]
     # Lattice accepts 4-36 characters: a bare UUID4 string.
     uuid.UUID(ingress_id)
     assert len(ingress_id) == 36
-    assert control.video_id == ingress_id
-    assert target.read_text() == f"SRT_TARGET=srt://lattice:8890?streamid={ingress_id}\n"
+    # The advertised id is the one Lattice returned, not the one we sent.
+    assert snap.video_id == f"{ingress_id}#1"
+    assert target.read_text() == f"SRT_TARGET=srt://lattice:8890?streamid={ingress_id}#1\n"
     assert marker.read_text() == target.read_text()
+
+
+def test_start_exports_push_url_to_the_command_environment(tmp_path):
+    seen = tmp_path / "seen_env"
+    client, video, control, target = _setup(
+        tmp_path, start_command=f"echo \"$SRT_TARGET\" > '{seen}'"
+    )
+    control.start()
+    assert seen.read_text().strip() == video.info.push_url
+
+
+def test_srt_target_file_is_replaced_even_when_the_old_one_is_read_only(tmp_path):
+    # A root-owned file from an earlier privileged run must not block the
+    # unprivileged daemon: the file is replaced by rename, never opened for
+    # writing in place.
+    client, video, control, target = _setup(tmp_path)
+    target.write_text("SRT_TARGET=srt://stale\n")
+    target.chmod(0o444)
+    control.start()
+    assert target.read_text() == f"SRT_TARGET={video.info.push_url}\n"
+    assert not (tmp_path / "srt_target.env.tmp").exists()
 
 
 def test_stop_runs_command_then_archives_and_clears_video(tmp_path):
     client, video, control, target = _setup(tmp_path)
     control.start()
-    ingress_id = control.video_id
+    ingress_id = control.snapshot().video_id
     control.stop()
 
-    assert control.streaming is False
-    assert control.video_id is None
-    assert client.calls == [("create", ingress_id), ("delete", ingress_id)]
+    assert control.snapshot() == ControlSnapshot(
+        desired_on=False, video_id=None, in_transition=False
+    )
+    assert client.calls == [("create", ingress_id[:-2]), ("delete", ingress_id)]
 
 
 def test_restart_uses_a_new_ingress_id(tmp_path):
     client, video, control, target = _setup(tmp_path)
     control.start()
-    first = control.video_id
+    first = control.snapshot().video_id
     control.stop()
     control.start()
-    second = control.video_id
+    second = control.snapshot().video_id
     assert first != second
     assert [c[0] for c in client.calls] == ["create", "delete", "create"]
 
@@ -97,8 +144,9 @@ def test_start_failure_on_ingress_leaves_state_unchanged(tmp_path):
     client, video, control, target = _setup(tmp_path, fail_create=True)
     with pytest.raises(CameraControlError, match="could not register video ingress"):
         control.start()
-    assert control.streaming is False
-    assert control.video_id is None
+    assert control.snapshot() == ControlSnapshot(
+        desired_on=False, video_id=None, in_transition=False
+    )
     assert not target.exists()
 
 
@@ -106,8 +154,8 @@ def test_start_command_failure_archives_the_new_ingress(tmp_path):
     client, video, control, target = _setup(tmp_path, start_command="exit 7")
     with pytest.raises(CameraControlError, match="exited with 7"):
         control.start()
-    assert control.streaming is False
-    assert control.video_id is None
+    assert control.snapshot().desired_on is False
+    assert control.snapshot().video_id is None
     assert [c[0] for c in client.calls] == ["create", "delete"]
 
 
@@ -116,38 +164,200 @@ def test_stop_command_failure_keeps_ingress(tmp_path):
     control.start()
     with pytest.raises(CameraControlError):
         control.stop()
-    assert control.streaming is True
-    assert control.video_id is not None
+    assert control.snapshot().desired_on is True
+    assert control.snapshot().video_id is not None
     assert [c[0] for c in client.calls] == ["create"]
 
 
 def test_archive_failure_reports_stopped_but_keeps_id_for_retry(tmp_path):
     client, video, control, target = _setup(tmp_path, fail_delete=True)
     control.start()
-    ingress_id = control.video_id
+    ingress_id = control.snapshot().video_id
     with pytest.raises(CameraControlError, match="could not be archived"):
         control.stop()
-    assert control.streaming is False
-    assert control.video_id == ingress_id  # retained so a retry can archive it
-    client.fail_delete = False
+    assert control.snapshot().desired_on is False
+    assert control.snapshot().video_id == ingress_id  # retained so a retry can archive it
+    client.video.fail_delete = False
     control.stop()  # retry succeeds
-    assert control.video_id is None
+    assert control.snapshot().video_id is None
 
 
 def test_shutdown_is_best_effort(tmp_path):
-    client, video, control, target = _setup(tmp_path, fail_delete=True)
+    client, video, control, target = _setup(tmp_path, fail_delete=True, stop_command="false")
     control.start()
     control.shutdown()  # must not raise
-    assert control.streaming is False
+    assert control.snapshot().desired_on is False
     assert [c[0] for c in client.calls] == ["create", "delete"]
 
 
-def test_without_video_transitions_are_state_only():
+def test_without_video_or_pipeline_transitions_are_state_only():
     control = CameraControl()
     control.start()
-    assert control.streaming is True and control.video_id is None
+    assert control.snapshot() == ControlSnapshot(
+        desired_on=True, video_id=None, in_transition=False
+    )
     control.stop()
-    assert control.streaming is False
+    assert control.snapshot().desired_on is False
+
+
+def test_initial_desired_state_is_honoured():
+    assert CameraControl(desired_on=True).snapshot().desired_on is True
+
+
+# --- commands --------------------------------------------------------------------
+
+
+def test_camera_control_commands():
+    ok = CameraControl(pipeline=CommandPipeline(start_command="true", stop_command="false"))
+    ok.start()
+    assert ok.snapshot().desired_on is True
+    with pytest.raises(CameraControlError, match="stop command exited with 1"):
+        ok.stop()
+    # A failed stop leaves the desired state untouched.
+    assert ok.snapshot().desired_on is True
+
+
+def test_pipeline_errors_are_reported_as_control_errors():
+    class Broken:
+        def start(self, push_url):
+            raise PipelineError("boom")
+
+        def stop(self):
+            raise PipelineError("bang")
+
+        def status(self):
+            raise AssertionError("not called by control")
+
+    control = CameraControl(pipeline=Broken())
+    with pytest.raises(CameraControlError, match="boom"):
+        control.start()
+    control = CameraControl(pipeline=Broken(), desired_on=True)
+    with pytest.raises(CameraControlError, match="bang"):
+        control.stop()
+
+
+# --- state persistence and recovery ----------------------------------------------
+
+
+def _state_of(video: VideoIngress) -> StateStore:
+    return video._state  # the store the ingress was built with
+
+
+def test_create_persists_the_ingress_record(tmp_path):
+    client, video, control, target = _setup(tmp_path)
+    control.start()
+    record = _state_of(video).get(STATE_KEY)
+    info = video.info
+    assert record["video_id"] == info.video_id
+    assert record["push_url"] == info.push_url
+    assert record["session_id"] == info.session_id
+    assert "created_at" in record
+    # It really is on disk: a fresh store sees it.
+    assert StateStore(str(tmp_path / "state.json")).get(STATE_KEY) == record
+
+
+def test_delete_clears_the_ingress_record(tmp_path):
+    client, video, control, target = _setup(tmp_path)
+    control.start()
+    control.stop()
+    assert _state_of(video).get(STATE_KEY) is None
+
+
+def test_archive_failure_keeps_the_ingress_record(tmp_path):
+    client, video, control, target = _setup(tmp_path, fail_delete=True)
+    control.start()
+    with pytest.raises(CameraControlError):
+        control.stop()
+    assert _state_of(video).get(STATE_KEY)["video_id"] == control.snapshot().video_id
+
+
+def test_recover_archives_a_persisted_orphan_and_clears_it(tmp_path):
+    state = StateStore(str(tmp_path / "state.json"))
+    state.set(STATE_KEY, {"video_id": "old#7", "push_url": "srt://x", "session_id": "s"})
+    client = FakeClient()
+    video = VideoIngress(client, title="cam", state=state)
+    control = CameraControl(video=video)
+
+    control.recover()
+
+    assert client.calls == [("delete", "old#7")]
+    assert state.get(STATE_KEY) is None
+    assert control.snapshot().video_id is None
+
+
+def test_recover_keeps_the_record_when_archiving_fails(tmp_path):
+    state = StateStore(str(tmp_path / "state.json"))
+    record = {"video_id": "old#7", "push_url": "srt://x", "session_id": "s"}
+    state.set(STATE_KEY, record)
+    client = FakeClient(fail_delete=True)
+    control = CameraControl(video=VideoIngress(client, title="cam", state=state))
+
+    control.recover()  # must not raise
+
+    assert client.calls == [("delete", "old#7")]
+    assert state.get(STATE_KEY) == record
+
+
+def test_recover_is_a_noop_without_a_record(tmp_path):
+    state = StateStore(str(tmp_path / "state.json"))
+    client = FakeClient()
+    CameraControl(video=VideoIngress(client, title="cam", state=state)).recover()
+    assert client.calls == []
+    CameraControl(video=VideoIngress(client, title="cam", state=None)).recover()
+    CameraControl().recover()
+    assert client.calls == []
+
+
+def test_recover_ignores_a_malformed_record(tmp_path):
+    state = StateStore(str(tmp_path / "state.json"))
+    state.set(STATE_KEY, "not a record")
+    client = FakeClient()
+    CameraControl(video=VideoIngress(client, title="cam", state=state)).recover()
+    assert client.calls == []
+
+
+def test_recover_never_archives_the_live_ingress(tmp_path):
+    client, video, control, target = _setup(tmp_path)
+    control.start()
+    control.recover()
+    assert [c[0] for c in client.calls] == ["create"]
+    assert control.snapshot().video_id is not None
+
+
+# --- the lock rule: reads never wait on an RPC -------------------------------
+
+
+def test_snapshot_does_not_block_while_a_transition_is_inside_an_rpc(tmp_path):
+    client, video, control, target = _setup(tmp_path)
+    client.video.entered = threading.Event()
+    client.video.release = threading.Event()
+
+    errors: list[BaseException] = []
+
+    def run_start():
+        try:
+            control.start()
+        except BaseException as exc:  # pragma: no cover - surfaces in the assertion below
+            errors.append(exc)
+
+    starter = threading.Thread(target=run_start)
+    starter.start()
+    try:
+        assert client.video.entered.wait(5.0), "start never reached the RPC"
+
+        snapshots: list[ControlSnapshot] = []
+        reader = threading.Thread(target=lambda: snapshots.append(control.snapshot()))
+        reader.start()
+        reader.join(1.0)
+        assert not reader.is_alive(), "snapshot() blocked behind the transition"
+        assert snapshots == [ControlSnapshot(desired_on=False, video_id=None, in_transition=True)]
+    finally:
+        client.video.release.set()
+        starter.join(5.0)
+
+    assert not errors
+    assert control.snapshot().in_transition is False
+    assert control.snapshot().desired_on is True
 
 
 # --- entity updates as part of the transition --------------------------------
@@ -162,8 +372,8 @@ class RecordingPublisher:
         self.snapshots: list[tuple[bool, str | None]] = []
 
     def __call__(self) -> None:
-        control = self._control_ref[0]
-        self.snapshots.append((control.streaming, control.video_id))
+        snap = self._control_ref[0].snapshot()
+        self.snapshots.append((snap.desired_on, snap.video_id))
         if self.fail:
             raise RuntimeError("publish failed")
 
@@ -180,17 +390,17 @@ def _setup_with_publisher(tmp_path, *, fail_publish=False, **kwargs):
 def test_start_publishes_new_ingress_id_to_entity_after_stream_is_up(tmp_path):
     client, control, publisher = _setup_with_publisher(tmp_path)
     control.start()
-    # Exactly one publish, made after the ingress exists and streaming is on,
-    # so the asset's Media items carry the new id.
-    assert publisher.snapshots == [(True, control.video_id)]
-    assert control.video_id is not None
+    # Exactly one publish, made after the ingress exists and the stream is
+    # desired on, so the asset's Media items carry the new id.
+    assert publisher.snapshots == [(True, control.snapshot().video_id)]
+    assert control.snapshot().video_id is not None
 
 
 def test_stop_publishes_cleared_media_after_archiving(tmp_path):
     client, control, publisher = _setup_with_publisher(tmp_path)
     control.start()
     control.stop()
-    # The stop-time publish happens after delete: no video id, not streaming.
+    # The stop-time publish happens after delete: no video id, not desired on.
     assert publisher.snapshots[-1] == (False, None)
     assert client.calls[-1][0] == "delete"
 
@@ -200,18 +410,20 @@ def test_publish_failure_fails_the_transition_but_keeps_stream_state(tmp_path):
     with pytest.raises(CameraControlError, match="entity could not be updated"):
         control.start()
     # The stream really is up; a repeated Start reuses the ingress and retries.
-    assert control.streaming is True
-    ingress_id = control.video_id
+    assert control.snapshot().desired_on is True
+    ingress_id = control.snapshot().video_id
     publisher.fail = False
     control.start()
-    assert control.video_id == ingress_id
+    assert control.snapshot().video_id == ingress_id
     assert [c[0] for c in client.calls] == ["create"]
 
 
-def test_shutdown_publishes_final_state_best_effort(tmp_path):
-    client, control, publisher = _setup_with_publisher(tmp_path, fail_publish=True)
-    publisher.fail = False
+def test_shutdown_does_not_publish(tmp_path):
+    client, control, publisher = _setup_with_publisher(tmp_path)
     control.start()
-    publisher.fail = True
-    control.shutdown()  # must not raise
-    assert publisher.snapshots[-1] == (False, None)
+    assert len(publisher.snapshots) == 1
+    control.shutdown()
+    assert len(publisher.snapshots) == 1  # main.py publishes the offline entity itself
+    assert control.snapshot() == ControlSnapshot(
+        desired_on=False, video_id=None, in_transition=False
+    )

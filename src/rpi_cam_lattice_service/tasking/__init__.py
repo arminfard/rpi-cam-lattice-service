@@ -9,7 +9,7 @@ from .definitions import (
     task_name_from_type_url,
     task_type_url,
 )
-from .handler import TaskHandler
+from .handler import TaskHandler, TaskStreamState
 
 __all__ = [
     "SUPPORTED_TASKS",
@@ -17,6 +17,7 @@ __all__ = [
     "TASK_STOP",
     "TYPE_URL_PREFIX",
     "TaskHandler",
+    "TaskStreamState",
     "task_name_from_type_url",
     "task_type_url",
 ]

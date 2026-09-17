@@ -37,7 +37,7 @@ def main() -> int:
     entity_id = args.entity_id or config.entity_id
 
     with LatticeClient(config) as client:
-        response = client.get_entity(entity_id, timeout_ms=30000)
+        response = client.entities.get_entity(entity_id, timeout_ms=30000)
         entity = response.entity
         print("entity_id:      ", entity.entity_id)
         print("is_live:        ", entity.is_live)
@@ -59,6 +59,11 @@ def main() -> int:
                 print("   ", definition.task_specification_url)
         else:
             print("task catalog:    <none advertised>")
+        if entity.health is not None:
+            print("health status:  ", entity.health.health_status.name)
+            print("connection:     ", entity.health.connection_status.name)
+        else:
+            print("health:          <none reported>")
         print("expiry_time:    ", entity.expiry_time.to_datetime().isoformat())
         if not entity.is_live:
             print("WARNING: entity is not live", file=sys.stderr)

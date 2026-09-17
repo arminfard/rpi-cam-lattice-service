@@ -1,11 +1,28 @@
+# systemd unit for the Lattice camera daemon.
+#
+# Install (or run `make install-units` from the repo root):
+#   sudo install -m 0644 deploy/systemd/rpi-cam-lattice-service.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now rpi-cam-lattice-service
+#
+# PLACEHOLDERS to edit before installing: every occurrence of the project path
+# (/home/airhead/workspace/rpi-cam-lattice-service) and of the service account
+# (User=/Group= airhead). The account must own the project directory (it writes
+# srt_target.env and state.json there) and must match the sudoers rule in
+# deploy/sudoers.d/rpi-cam-lattice-service.
+
 [Unit]
-Description=rpi-cam-lattice-service — publishes the Pi camera as a Lattice entity (gRPC/Connect)
+Description=rpi-cam-lattice-service - publishes the Pi camera as a Lattice entity (gRPC/Connect)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-# Edit these paths to match your Raspberry Pi deployment.
+# Run unprivileged. The daemon only needs to reach Lattice, write two small
+# files in its project directory and call `sudo systemctl restart|stop
+# mediamtx-srt`, which the sudoers rule allows without a password.
+User=airhead
+Group=airhead
 WorkingDirectory=/home/airhead/workspace/rpi-cam-lattice-service
 # Runs the console script from the project's virtualenv. --config points at the
 # .env file; alternatively drop the file and use EnvironmentFile= below.
@@ -19,9 +36,20 @@ RestartSec=5
 # Graceful shutdown: the service handles SIGTERM and drains within 30s.
 TimeoutStopSec=35
 
-# Hardening (optional, recommended):
-# NoNewPrivileges=yes
-# ProtectSystem=strict
+# Hardening. Chosen to stay compatible with the sudo call the Start/Stop tasks
+# make (TASK_START_COMMAND / TASK_STOP_COMMAND):
+#   - NoNewPrivileges=yes is deliberately NOT set: it forbids the setuid
+#     transition sudo relies on, so every Start/Stop task would fail.
+#   - ProtectHome= is NOT set: the project lives under /home.
+#   - ProtectSystem=strict is NOT used: it would make the project directory
+#     read-only; =full only protects /usr, /boot, /efi and /etc.
+# After installing, confirm sudo still works from inside the unit:
+#   grep NoNewPrivs /proc/$(systemctl show -p MainPID --value rpi-cam-lattice-service)/status
+# must print "NoNewPrivs: 0".
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
 
 [Install]
 WantedBy=multi-user.target

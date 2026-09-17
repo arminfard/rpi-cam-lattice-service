@@ -1,11 +1,16 @@
-"""VideoManager API: register and archive the camera's SRT ingress stream."""
+"""VideoManager API: register and archive the camera's SRT ingress stream.
+
+Ingress ids are **server-shaped**. Lattice does not simply echo the id the
+caller supplies: observed live in this deployment, the client sent a UUID and
+``CreateIngressStreamResponse.ingress_id`` came back as ``<client id>#<suffix>``
+(``82a0497e-...#c8b80372-...``). Callers must therefore treat the *returned*
+``video_id`` as the ingress identity: advertise it on the entity's ``Media``
+and archive by it. Deleting by the id that was sent will not find the stream.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from connectrpc.protocol import ProtocolType
-from protobuf import Oneof
 
 from anduril.videomanager.v1.create_ingress_stream_request_pub_pb import (
     CreateIngressStreamRequest,
@@ -17,6 +22,8 @@ from anduril.videomanager.v1.srt_settings_pub_pb import SrtSettings
 from anduril.videomanager.v1.video_manager_api_pub_connect import (
     VideoManagerAPIClientSync,
 )
+from connectrpc.protocol import ProtocolType
+from protobuf import Oneof
 
 from .auth import AuthProvider
 
@@ -25,7 +32,9 @@ from .auth import AuthProvider
 class SrtIngressInfo:
     """Result of registering an SRT ingress stream with Lattice VideoManager."""
 
-    video_id: str  # the ingress stream id — advertised on the entity's Media
+    # The ingress id AS RETURNED by Lattice (``<client id>#<suffix>``), not
+    # the one sent; advertise on the entity's Media and delete by this value.
+    video_id: str
     push_url: str  # the SRT URL the producer (MediaMTX) should push to
     session_id: str  # the SRT streamid the producer must include
 
@@ -48,8 +57,9 @@ class VideoClient:
         """Register an SRT ingress stream with Lattice VideoManager.
 
         Returns the video id (to advertise on the entity) and the SRT URL the
-        producer should push to. Raises on failure — the caller decides whether
-        to proceed without video.
+        producer should push to. The returned id is the server's, which is not
+        the ``ingress_id`` passed in (see the module docstring). Raises on
+        failure — the caller decides whether to proceed without video.
         """
         request = CreateIngressStreamRequest(
             title=title,
@@ -62,8 +72,7 @@ class VideoClient:
         oneof = response.ingress  # Oneof(field, value)
         if oneof is None or oneof.field != "srt":
             raise RuntimeError(
-                f"VideoManager returned unexpected ingress type: "
-                f"{getattr(oneof, 'field', None)}"
+                f"VideoManager returned unexpected ingress type: {getattr(oneof, 'field', None)}"
             )
         srt = oneof.value
         return SrtIngressInfo(
@@ -72,12 +81,12 @@ class VideoClient:
             session_id=srt.session_id,
         )
 
-    def delete_srt_ingress(
-        self, ingress_id: str, *, timeout_ms: int | None = 30000
-    ) -> None:
+    def delete_srt_ingress(self, ingress_id: str, *, timeout_ms: int | None = 30000) -> None:
         """Stop (archive) an ingress stream in Lattice VideoManager.
 
-        Lattice keeps the archived record retrievable under the same id, so a
+        ``ingress_id`` must be the id Lattice returned from
+        :meth:`create_srt_ingress`, not the one the caller proposed. Lattice
+        keeps the archived record retrievable under the same id, so a
         subsequent Start must register a new ingress under a new id.
         """
         self.stub.delete_ingress_stream(

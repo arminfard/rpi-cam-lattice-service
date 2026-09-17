@@ -4,21 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rpi-cam-lattice-service"
-version = "0.1.0"
-description = "Raspberry Pi camera Lattice integration (gRPC/Connect) — publishes the camera as a Lattice entity alongside a MediaMTX SRT stream"
-requires-python = ">=3.10"
+version = "0.2.0"
+description = "Raspberry Pi camera Lattice integration (gRPC/Connect) - publishes the camera as a Lattice entity alongside a MediaMTX SRT stream"
+requires-python = ">=3.11"
 dependencies = [
     # The two Buf Schema Registry packages are served from Anduril's index,
     # not PyPI. Install with requirements.txt (which carries the
     # --extra-index-url), or configure the index yourself:
     #   pip install --extra-index-url https://schema-registry.developer.anduril.com/gen/python .
-    "anduril-lattice-sdk-bufbuild-py",
-    "anduril-lattice-sdk-connectrpc-py",
+    # Pinned to the exact builds the code was validated against; keep these in
+    # sync with requirements.txt.
+    "anduril-lattice-sdk-bufbuild-py==0.3.0.1.20260911022018+6ddd10d2bd0b",
+    "anduril-lattice-sdk-connectrpc-py==0.11.1.2.20260911022018+6ddd10d2bd0b",
     "python-dotenv",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "ruff", "mypy"]
 
 [project.scripts]
 rpi-cam-lattice-service = "rpi_cam_lattice_service.main:main"
@@ -29,3 +31,21 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rpi_cam_lattice_service"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from connectrpc.protocol import ProtocolType
-
 from anduril.entitymanager.v1.entity_manager_api_pub_connect import (
     EntityManagerAPIClientSync,
 )
@@ -12,6 +10,7 @@ from anduril.entitymanager.v1.entity_manager_api_pub_pb import (
     GetEntityResponse,
     PublishEntityRequest,
 )
+from connectrpc.protocol import ProtocolType
 
 from .auth import AuthProvider
 
@@ -27,13 +26,9 @@ class EntityClient:
         self, request: PublishEntityRequest, *, timeout_ms: int | None = None
     ) -> None:
         """Publish (upsert) an entity, attaching fresh auth metadata."""
-        self.stub.publish_entity(
-            request, headers=self._auth.headers(), timeout_ms=timeout_ms
-        )
+        self.stub.publish_entity(request, headers=self._auth.headers(), timeout_ms=timeout_ms)
 
-    def get_entity(
-        self, entity_id: str, *, timeout_ms: int | None = None
-    ) -> GetEntityResponse:
+    def get_entity(self, entity_id: str, *, timeout_ms: int | None = None) -> GetEntityResponse:
         """Read an entity back (used by the verification script)."""
         return self.stub.get_entity(
             GetEntityRequest(entity_id=entity_id),

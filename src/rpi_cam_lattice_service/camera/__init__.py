@@ -1,9 +1,15 @@
-"""The camera path: its observed state, the Lattice entity built from it, the
-task-driven stream control, and the SRT video ingress lifecycle."""
+"""The camera path: its observed state, the task-driven stream control, the
+media pipeline that realises it, and the SRT video ingress lifecycle."""
 
-from .control import CameraControl, CameraControlError
-from .entity import build_camera_publish_request
+from .control import CameraControl, CameraControlError, ControlSnapshot
 from .ingress import VideoIngress
+from .pipeline import (
+    CommandPipeline,
+    MediaMtxStatusProbe,
+    MediaPipeline,
+    PipelineError,
+    PipelineStatus,
+)
 from .source import CameraSource, CameraState
 
 __all__ = [
@@ -11,6 +17,11 @@ __all__ = [
     "CameraControlError",
     "CameraSource",
     "CameraState",
+    "CommandPipeline",
+    "ControlSnapshot",
+    "MediaMtxStatusProbe",
+    "MediaPipeline",
+    "PipelineError",
+    "PipelineStatus",
     "VideoIngress",
-    "build_camera_publish_request",
 ]

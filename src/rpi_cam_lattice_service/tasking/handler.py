@@ -4,7 +4,7 @@ The camera entity advertises a ``task_catalog`` listing the custom task types
 it accepts (see ``task-def/``). This module opens the ``ListenAsAgent`` stream
 for that entity, dispatches each ``ExecuteRequest`` on the *name* of the task
 message carried in the specification's type URL, runs the matching action on
-the :class:`CameraControl`, and drives the task through its status lifecycle:
+the camera control, and drives the task through its status lifecycle:
 
     SENT -> EXECUTING -> DONE_OK | DONE_NOT_OK
 
@@ -14,34 +14,62 @@ Lifecycle invariants (see the Lattice "Integrate an agent" guide):
 * Every status update carries a strictly increasing ``status_version``. The
   first update uses the version delivered with the task plus one.
 * Terminal states are final; a task never stays in ``EXECUTING``.
-* The stream is long-lived and reconnected on any error.
+* The stream is long-lived and reconnected on any error, with exponential
+  backoff plus jitter (``reconnect_base_seconds`` doubling up to
+  ``reconnect_cap_seconds``) so a flapping endpoint is not hammered. The
+  delay resets to the base once a message arrives on the stream.
 * Task execution runs on a worker thread so the stream loop never blocks.
 
-The handler runs in-process on its own daemon thread (started by ``Service``)
-but depends only on ``LatticeClient`` and ``CameraControl``, so it can be
-hosted by a separate entry point later if isolation becomes worth the cost.
-The task names and type-URL helpers live in ``definitions.py``.
+The handler runs as a ``Service`` worker (``run(stop)`` on a daemon thread)
+and depends only on ``client.tasks`` and an object with ``start()``/``stop()``
+(the ``CameraControl``), so it can be hosted by a separate entry point later
+if isolation becomes worth the cost. ``stream_state()`` gives the health
+probes a thread-safe view of the connection. The task names and type-URL
+helpers live in ``definitions.py``.
 """
 
 from __future__ import annotations
 
+import random
 import threading
 from collections.abc import Callable
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Protocol
 
 from anduril.taskmanager.v1.task_manager_api_pub_pb import ListenAsAgentResponse
 from anduril.taskmanager.v1.task_pub_pb import ErrorCode, Status, Task
 
-from ..camera.control import CameraControl
-from ..lattice import LatticeClient
 from ..logging_setup import get_logger
 from .definitions import TASK_START, TASK_STOP, task_name_from_type_url, task_type_url
+
+if TYPE_CHECKING:
+    from ..lattice import LatticeClient
 
 logger = get_logger(__name__)
 
 DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
-DEFAULT_RECONNECT_DELAY_SECONDS = 2.0
+DEFAULT_RECONNECT_BASE_SECONDS = 1.0
+DEFAULT_RECONNECT_CAP_SECONDS = 30.0
 UPDATE_STATUS_TIMEOUT_MS = 10_000
+
+
+class CameraActions(Protocol):
+    """What the handler needs from the camera control: the two task actions."""
+
+    def start(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+
+@dataclass(frozen=True)
+class TaskStreamState:
+    """Thread-safe snapshot of the agent stream, for health reporting."""
+
+    connected: bool
+    last_heartbeat: datetime | None
+    last_error: str | None
+    reconnects: int
 
 
 class _ActiveTask:
@@ -67,16 +95,18 @@ class TaskHandler:
         *,
         agent_entity_id: str,
         task_package: str,
-        control: CameraControl,
+        control: CameraActions,
         heartbeat_interval_ms: int = DEFAULT_HEARTBEAT_INTERVAL_MS,
-        reconnect_delay_seconds: float = DEFAULT_RECONNECT_DELAY_SECONDS,
+        reconnect_base_seconds: float = DEFAULT_RECONNECT_BASE_SECONDS,
+        reconnect_cap_seconds: float = DEFAULT_RECONNECT_CAP_SECONDS,
     ) -> None:
         self._client = client
         self._entity_id = agent_entity_id
         self._package = task_package
         self._control = control
         self._heartbeat_interval_ms = heartbeat_interval_ms
-        self._reconnect_delay = reconnect_delay_seconds
+        self._reconnect_base = max(0.0, reconnect_base_seconds)
+        self._reconnect_cap = max(self._reconnect_base, reconnect_cap_seconds)
 
         self._actions: dict[str, Callable[[], None]] = {
             task_type_url(task_package, TASK_START): control.start,
@@ -84,7 +114,13 @@ class TaskHandler:
         }
         self._active: dict[str, _ActiveTask] = {}
         self._active_lock = threading.Lock()
+
+        # Stream state, read by other threads via stream_state().
+        self._state_lock = threading.Lock()
+        self._connected = False
         self._last_heartbeat: datetime | None = None
+        self._last_error: str | None = None
+        self._reconnects = 0
 
     # -- catalog -------------------------------------------------------------
 
@@ -93,9 +129,39 @@ class TaskHandler:
         """Type URLs to advertise in the entity's ``task_catalog``."""
         return list(self._actions)
 
+    # -- stream state --------------------------------------------------------
+
     @property
     def last_heartbeat(self) -> datetime | None:
-        return self._last_heartbeat
+        return self.stream_state().last_heartbeat
+
+    def stream_state(self) -> TaskStreamState:
+        """Snapshot of the agent stream for health/verification consumers."""
+        with self._state_lock:
+            return TaskStreamState(
+                connected=self._connected,
+                last_heartbeat=self._last_heartbeat,
+                last_error=self._last_error,
+                reconnects=self._reconnects,
+            )
+
+    def _set_state(
+        self,
+        *,
+        connected: bool | None = None,
+        heartbeat: datetime | None = None,
+        error: str | None = None,
+        reconnect: bool = False,
+    ) -> None:
+        with self._state_lock:
+            if connected is not None:
+                self._connected = connected
+            if heartbeat is not None:
+                self._last_heartbeat = heartbeat
+            if error is not None:
+                self._last_error = error
+            if reconnect:
+                self._reconnects += 1
 
     # -- stream loop ---------------------------------------------------------
 
@@ -111,9 +177,14 @@ class TaskHandler:
             entity_id=self._entity_id,
             tasks=self.task_specification_urls,
         )
+        delay = self._reconnect_base
+        attempts = 0
         while not stop.is_set():
+            if attempts:
+                self._set_state(reconnect=True)
+            attempts += 1
             try:
-                stream = self._client.listen_as_agent(
+                stream = self._client.tasks.listen_as_agent(
                     self._entity_id, heartbeat_interval_ms=self._heartbeat_interval_ms
                 )
                 logger.info("task stream opened", entity_id=self._entity_id)
@@ -123,26 +194,40 @@ class TaskHandler:
                 for response in stream:
                     if first:
                         logger.info("task stream connected", entity_id=self._entity_id)
+                        self._set_state(connected=True)
                         first = False
+                    # A live stream resets the backoff for the next outage.
+                    delay = self._reconnect_base
                     if stop.is_set():
                         break
                     self.handle_response(response)
-                logger.warning("task stream ended; reconnecting")
+                self._set_state(connected=False)
+                if stop.is_set():
+                    break
+                logger.warning("task stream ended; reconnecting", retry_in_seconds=delay)
             except Exception as exc:
+                self._set_state(connected=False, error=str(exc))
                 if stop.is_set():
                     break
                 logger.warning(
                     "task stream error; reconnecting",
                     error=str(exc),
-                    retry_in_seconds=self._reconnect_delay,
+                    retry_in_seconds=delay,
                 )
-            stop.wait(self._reconnect_delay)
+            stop.wait(self._jitter(delay))
+            delay = min(delay * 2, self._reconnect_cap)
+        self._set_state(connected=False)
         logger.info("task handler stopping")
+
+    @staticmethod
+    def _jitter(delay: float) -> float:
+        """Randomise a backoff delay within [delay/2, delay] to spread reconnects."""
+        return delay * random.uniform(0.5, 1.0)
 
     def handle_response(self, response: ListenAsAgentResponse) -> None:
         """Dispatch one stream message (heartbeat, execute, cancel, complete)."""
         if response.has_field("heartbeat"):
-            self._last_heartbeat = datetime.now(timezone.utc)
+            self._set_state(heartbeat=datetime.now(UTC))
             logger.debug("task stream heartbeat")
             return
 
@@ -172,7 +257,10 @@ class TaskHandler:
                 return
             self._active[active.task_id] = active
         threading.Thread(
-            target=self.execute, args=(active,), name=f"task-{active.task_id[:8]}", daemon=True
+            target=self.execute,
+            args=(active,),
+            name=f"task-{active.task_id[:8]}",
+            daemon=True,
         ).start()
 
     def execute(self, active: _ActiveTask) -> None:
@@ -192,7 +280,11 @@ class TaskHandler:
         try:
             action = self._actions.get(type_url)
             if action is None:
-                self._update(active, Status.DONE_NOT_OK, error=f"unsupported task type: {type_url or '<none>'}")
+                self._update(
+                    active,
+                    Status.DONE_NOT_OK,
+                    error=f"unsupported task type: {type_url or '<none>'}",
+                )
                 return
 
             self._update(active, Status.EXECUTING)
@@ -244,7 +336,7 @@ class TaskHandler:
         if active.terminal:
             return
         active.status_version += 1
-        self._client.update_task_status(
+        self._client.tasks.update_task_status(
             task_id=active.task_id,
             definition_version=active.definition_version,
             status_version=active.status_version,
