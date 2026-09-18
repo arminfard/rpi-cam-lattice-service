@@ -19,8 +19,8 @@ from anduril.taskmanager.v1.task_pub_pb import ErrorCode, Status, Task, TaskVers
 from protobuf import Oneof
 from protobuf.wkt import any_pb
 
-from service.tasking.definitions import task_name_from_type_url, task_type_url
-from service.tasking.handler import TaskHandler, TaskStreamState
+from lattice_cam.tasking.definitions import task_name_from_type_url, task_type_url
+from lattice_cam.tasking.handler import TaskHandler, TaskStreamState
 
 PACKAGE = "anduril.sample_app_rpi_cam.camera.v1alpha"
 AGENT = "rpi-cam-01"

@@ -18,11 +18,11 @@ import sys
 # Make ``src`` importable when run directly from the repo root.
 sys.path.insert(0, "src")
 
-from service import config as config_module  # noqa: E402
-from service.camera.source import pi_serial_number  # noqa: E402
-from service.entity.identity import resolve_entity_id  # noqa: E402
-from service.lattice import LatticeClient  # noqa: E402
-from service.state import StateStore  # noqa: E402
+from lattice_cam import config as config_module  # noqa: E402
+from lattice_cam.camera.source import pi_serial_number  # noqa: E402
+from lattice_cam.entity.identity import resolve_entity_id  # noqa: E402
+from lattice_cam.lattice import LatticeClient  # noqa: E402
+from lattice_cam.state import StateStore  # noqa: E402
 
 
 def _print_health(health) -> None:

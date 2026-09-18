@@ -11,9 +11,9 @@ from anduril.entitymanager.v1.sensors_pub_pb import OperationalState, SensorType
 from anduril.entitymanager.v1.types_pub_pb import Template
 from anduril.ontology.v1.type_pub_pb import Disposition, Environment
 
-from service.camera.source import CameraSource
-from service.config import Config
-from service.entity import (
+from lattice_cam.camera.source import CameraSource
+from lattice_cam.config import Config
+from lattice_cam.entity import (
     ENTITY_EXPIRY_SECONDS,
     BuildContext,
     CameraObservation,
@@ -25,7 +25,7 @@ from service.entity import (
     base_entity,
     sidc_for,
 )
-from service.health import HealthContributor
+from lattice_cam.health import HealthContributor
 
 NOW = datetime(2026, 9, 16, 12, 0, 0, tzinfo=UTC)
 CREATED = NOW - timedelta(hours=1)
@@ -383,8 +383,8 @@ def test_alternate_id_is_omitted_when_empty():
 
 
 def test_identity_enums_are_validated_at_startup():
-    from service.config import ConfigError
-    from service.entity import validate_identity
+    from lattice_cam.config import ConfigError
+    from lattice_cam.entity import validate_identity
 
     cfg = _config()
     validate_identity(cfg)
@@ -400,7 +400,7 @@ def test_identity_enums_are_validated_at_startup():
 
 
 def test_pi_serial_number_reads_cpuinfo(tmp_path):
-    from service.camera.source import pi_serial_number
+    from lattice_cam.camera.source import pi_serial_number
 
     cpuinfo = tmp_path / "cpuinfo"
     cpuinfo.write_text("processor\t: 0\nModel\t\t: Raspberry Pi 5\nSerial\t\t: 10000000deadbeef\n")

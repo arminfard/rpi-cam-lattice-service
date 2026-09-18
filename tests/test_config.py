@@ -2,7 +2,7 @@
 
 import pytest
 
-from service.config import Config, ConfigError, load
+from lattice_cam.config import Config, ConfigError, load
 
 _KEYS = [
     "LATTICE_ENDPOINT",

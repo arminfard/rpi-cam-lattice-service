@@ -8,7 +8,7 @@ seconds on a worker thread and publishing the last snapshot keeps the
 heartbeat safe, and the snapshot's ``sampled_at`` tells consumers how fresh
 it is.
 
-The sampler is a ``Service`` worker: ``run(stop)`` loops until the stop event
+The sampler is a ``Runtime`` worker: ``run(stop)`` loops until the stop event
 is set. It is also usable synchronously (``sample_once``) so ``main.py`` can
 take a first sample before the service starts and tests need no thread.
 

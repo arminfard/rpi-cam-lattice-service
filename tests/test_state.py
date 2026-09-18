@@ -2,7 +2,7 @@
 
 import json
 
-from service.state import StateStore
+from lattice_cam.state import StateStore
 
 
 def test_roundtrip_persists_across_instances(tmp_path):
@@ -84,7 +84,7 @@ def test_flush_error_is_logged_again_when_it_changes(tmp_path, caplog, monkeypat
     def failing_replace(src, dst):
         raise next(errors)
 
-    monkeypatch.setattr("rpi_cam_lattice_service.state.os.replace", failing_replace)
+    monkeypatch.setattr("lattice_cam.state.os.replace", failing_replace)
     with caplog.at_level("WARNING"):
         store.set("a", 1)
         store.set("b", 2)

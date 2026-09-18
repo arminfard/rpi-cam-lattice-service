@@ -23,7 +23,7 @@ dependencies = [
 dev = ["pytest", "ruff", "mypy"]
 
 [project.scripts]
-rpi-cam-lattice-service = "rpi_cam_lattice_service.main:main"
+rpi-cam-lattice-service = "lattice_cam.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -41,7 +41,7 @@ src = ["src"]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["rpi_cam_lattice_service"]
+known-first-party = ["lattice_cam"]
 
 [tool.mypy]
 python_version = "3.11"

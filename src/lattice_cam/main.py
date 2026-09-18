@@ -53,7 +53,7 @@ from .health import (
 )
 from .lattice import LatticeClient
 from .logging_setup import configure, get_logger
-from .service import Service, Worker
+from .runtime import Runtime, Worker
 from .state import StateStore
 from .tasking.handler import TaskHandler
 
@@ -240,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     config.entity_id = resolve_entity_id(config, state, pi_serial_number())
     pipeline = _build_pipeline(config)
     control = _build_control(client, config, state, pipeline, logger)
-    service: Service | None = None
+    runtime: Runtime | None = None
     try:
         source = CameraSource(
             latitude_degrees=config.camera_latitude,
@@ -278,10 +278,10 @@ def main(argv: list[str] | None = None) -> int:
             workers.append(("tasking", task_handler.run))
         if health is not None:
             workers.append(("health", health.run))
-        service = Service(config, client, builder=builder, workers=workers)
+        runtime = Runtime(config, client, builder=builder, workers=workers)
         # Start/Stop push their outcome to the asset immediately (Media item
         # added or cleared) instead of waiting for the next 1 Hz tick.
-        control.on_change = service.publish_now
+        control.on_change = runtime.publish_now
 
         # Archive an ingress a crashed predecessor never cleaned up, then
         # register a fresh one. Sample health first so the publish that
@@ -290,13 +290,13 @@ def main(argv: list[str] | None = None) -> int:
             health.sample_once()
         control.recover()
         _initial_start(control, logger)
-        return service.run()
+        return runtime.run()
     finally:
         # Leave nothing pushing at, or advertised as, a stream that no longer
         # has a producer, and tell operators the asset went offline on purpose.
         control.shutdown()
-        if service is not None:
-            service.publish_offline()
+        if runtime is not None:
+            runtime.publish_offline()
         client.close()
 
 

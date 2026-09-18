@@ -1,4 +1,4 @@
-"""Enables ``python -m rpi_cam_lattice_service``."""
+"""Enables ``python -m lattice_cam``."""
 
 from .main import main
 

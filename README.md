@@ -24,11 +24,11 @@ flowchart LR
 ## Layout
 
 ```
-src/rpi_cam_lattice_service/
+src/lattice_cam/
   main.py        wiring only
   config.py      strict .env parsing
   state.py       JSON state: ingress record, created_time
-  service.py     1 Hz publish loop, workers, offline publish at shutdown
+  runtime.py     1 Hz publish loop, workers, offline publish at shutdown
   lattice/       transport, auth, one thin client per API (.entities .video .tasks)
   entity/        base entity + one contributor per component (the extension seam)
   camera/        pipeline (MediaMTX commands + status probe), Start/Stop control, ingress

@@ -19,7 +19,7 @@ Pi consistent:
   raised so the task ends ``DONE_NOT_OK`` and a retry can finish the cleanup.
 
 The last step of ``start`` / ``stop`` is the ``on_change`` callback (wired to
-``Service.publish_now``) so the entity carries the new state immediately. Its
+``Runtime.publish_now``) so the entity carries the new state immediately. Its
 failure fails the transition but not the stream state: a repeated ``Start`` is
 idempotent (same ingress, pipeline restarted, publish retried).
 
@@ -93,7 +93,7 @@ class CameraControl:
         # Called (outside every lock) once a transition has taken effect, to
         # push the new state to the camera asset entity immediately: the new
         # ingress id into its Media items after Start, an empty Media list
-        # after Stop. Wired to ``Service.publish_now``.
+        # after Stop. Wired to ``Runtime.publish_now``.
         self.on_change = on_change
         self._desired_on = desired_on
         self._in_transition = False

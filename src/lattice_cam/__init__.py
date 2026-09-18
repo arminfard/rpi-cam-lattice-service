@@ -19,7 +19,7 @@ Subpackages:
                  entity's ``Health`` component.
 
 Root modules: ``config`` (.env), ``state`` (persistent JSON state),
-``logging_setup`` (JSON logs), ``service`` (publish loop, workers, signals),
+``logging_setup`` (JSON logs), ``runtime`` (publish loop, workers, signals),
 ``main`` (CLI wiring).
 """
 

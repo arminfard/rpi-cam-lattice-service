@@ -14,15 +14,15 @@ import uuid
 
 import pytest
 
-from service.camera.control import (
+from lattice_cam.camera.control import (
     CameraControl,
     CameraControlError,
     ControlSnapshot,
 )
-from service.camera.ingress import STATE_KEY, VideoIngress
-from service.camera.pipeline import CommandPipeline, PipelineError
-from service.lattice import SrtIngressInfo
-from service.state import StateStore
+from lattice_cam.camera.ingress import STATE_KEY, VideoIngress
+from lattice_cam.camera.pipeline import CommandPipeline, PipelineError
+from lattice_cam.lattice import SrtIngressInfo
+from lattice_cam.state import StateStore
 
 
 class FakeVideoClient:
@@ -364,7 +364,7 @@ def test_snapshot_does_not_block_while_a_transition_is_inside_an_rpc(tmp_path):
 
 
 class RecordingPublisher:
-    """Stands in for Service.publish_now: records the control state at call time."""
+    """Stands in for Runtime.publish_now: records the control state at call time."""
 
     def __init__(self, control_ref: list, fail: bool = False) -> None:
         self._control_ref = control_ref

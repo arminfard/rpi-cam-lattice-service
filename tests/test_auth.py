@@ -6,8 +6,8 @@ from __future__ import annotations
 import threading
 import time
 
-from service.config import Config
-from service.lattice.auth import AuthProvider
+from lattice_cam.config import Config
+from lattice_cam.lattice.auth import AuthProvider
 
 
 class FakeResponse:

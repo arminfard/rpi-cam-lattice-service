@@ -20,12 +20,12 @@ from anduril.entitymanager.v1.health_status_pub_pb import (
     HealthStatus,
 )
 
-from service import main as main_module
-from service.camera.control import CameraControl
-from service.camera.pipeline import CommandPipeline, PipelineStatus
-from service.config import Config
-from service.entity import BuildContext, EntityBuilder
-from service.health import (
+from lattice_cam import main as main_module
+from lattice_cam.camera.control import CameraControl
+from lattice_cam.camera.pipeline import CommandPipeline, PipelineStatus
+from lattice_cam.config import Config
+from lattice_cam.entity import BuildContext, EntityBuilder
+from lattice_cam.health import (
     AlertLevel,
     AlertReport,
     ComponentReport,
@@ -43,8 +43,8 @@ from service.health import (
     ThrottledFlags,
     ThrottledFlagsReader,
 )
-from service.health.probes import _Activation
-from service.tasking.handler import TaskStreamState
+from lattice_cam.health.probes import _Activation
+from lattice_cam.tasking.handler import TaskStreamState
 
 NOW = datetime(2026, 9, 16, 12, 0, 0, tzinfo=UTC)
 LATER = NOW + timedelta(seconds=5)
@@ -199,7 +199,7 @@ def test_reader_returns_none_when_command_fails(caplog):
         raise FileNotFoundError("vcgencmd")
 
     reader = ThrottledFlagsReader(runner)
-    with caplog.at_level(logging.WARNING, logger="rpi_cam_lattice_service.health.probes"):
+    with caplog.at_level(logging.WARNING, logger="lattice_cam.health.probes"):
         assert reader(NOW) is None
         assert reader(LATER) is None
     warnings = [r for r in caplog.records if "vcgencmd unavailable" in r.getMessage()]
@@ -673,7 +673,7 @@ class _Fixed(ProbeBase):
 
 
 def test_probe_base_never_raises(caplog):
-    with caplog.at_level(logging.WARNING, logger="rpi_cam_lattice_service.health.probes"):
+    with caplog.at_level(logging.WARNING, logger="lattice_cam.health.probes"):
         (component,) = _Fixed(status=None).sample(NOW).components
     assert component.status is Status.NOT_READY
     assert component.messages == ("probe error: sensor gone",)
@@ -721,7 +721,7 @@ def test_sampler_survives_a_probe_that_breaks_the_contract(caplog):
             raise RuntimeError("contract broken")
 
     sampler = HealthSampler([Rogue(), _Fixed()], interval_s=5.0, clock=lambda: NOW)
-    with caplog.at_level(logging.ERROR, logger="rpi_cam_lattice_service.health.sampler"):
+    with caplog.at_level(logging.ERROR, logger="lattice_cam.health.sampler"):
         snapshot = sampler.sample_once()
     assert [c.id for c in snapshot.components] == ["fixed"]
     assert any("health probe raised" in r.getMessage() for r in caplog.records)
@@ -730,7 +730,7 @@ def test_sampler_survives_a_probe_that_breaks_the_contract(caplog):
 def test_sampler_logs_only_status_changes(caplog):
     probe = _Fixed(Status.HEALTHY)
     sampler = HealthSampler([probe], interval_s=5.0, clock=lambda: NOW)
-    with caplog.at_level(logging.INFO, logger="rpi_cam_lattice_service.health.sampler"):
+    with caplog.at_level(logging.INFO, logger="lattice_cam.health.sampler"):
         sampler.sample_once()  # first sighting: logged
         sampler.sample_once()  # unchanged: quiet
         probe.status = Status.FAIL
@@ -956,7 +956,7 @@ def test_build_health_sampling_is_hermetic_off_the_pi(tmp_path, monkeypatch):
     def no_subprocess(argv):
         raise FileNotFoundError(argv[0])
 
-    monkeypatch.setattr("rpi_cam_lattice_service.health.probes._subprocess_runner", no_subprocess)
+    monkeypatch.setattr("lattice_cam.health.probes._subprocess_runner", no_subprocess)
     sampler = main_module._build_health(_wiring_config(), CameraControl(), CommandPipeline(), None)
     assert sampler is not None
     thermal = sampler.probes[0]

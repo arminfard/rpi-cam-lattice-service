@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import uuid
 
-from service.config import Config
-from service.entity.identity import (
+from lattice_cam.config import Config
+from lattice_cam.entity.identity import (
     STATE_KEY,
     canonical_uuid,
     derived_entity_id,
     resolve_entity_id,
 )
-from service.state import StateStore
+from lattice_cam.state import StateStore
 
 SERIAL = "10000000deadbeef"
 

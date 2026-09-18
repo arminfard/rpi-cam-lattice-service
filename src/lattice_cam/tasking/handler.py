@@ -28,7 +28,7 @@ Lifecycle invariants (see the Lattice "Integrate an agent" guide):
   delay resets to the base once a message arrives on the stream.
 * Task execution runs on a worker thread so the stream loop never blocks.
 
-The handler runs as a ``Service`` worker (``run(stop)`` on a daemon thread)
+The handler runs as a ``Runtime`` worker (``run(stop)`` on a daemon thread)
 and depends only on ``client.tasks`` and an object with ``start()``/``stop()``
 (the ``CameraControl``), so it can be hosted by a separate entry point later
 if isolation becomes worth the cost. ``stream_state()`` gives the health

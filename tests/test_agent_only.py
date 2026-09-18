@@ -7,9 +7,9 @@ task creation ever leaks into the installed service package.
 
 from pathlib import Path
 
-import service
+import lattice_cam
 
-PACKAGE_DIR = Path(service.__file__).parent
+PACKAGE_DIR = Path(lattice_cam.__file__).parent
 FORBIDDEN = ("create_task(", "CreateTaskRequest")
 
 

@@ -1,4 +1,4 @@
-"""Service lifecycle: publish loop, background workers, signals, graceful shutdown.
+"""Runtime lifecycle: publish loop, background workers, signals, graceful shutdown.
 
 Signals are handled on the main thread (a Python requirement); the 1 Hz
 publish loop and every registered worker run on their own daemon thread and
@@ -41,8 +41,8 @@ FAILURE_LOG_EVERY = 30
 Worker = Callable[[threading.Event], None]
 
 
-class Service:
-    """The long-running service."""
+class Runtime:
+    """The long-running runtime: publish loop, workers, signals, shutdown."""
 
     def __init__(
         self,

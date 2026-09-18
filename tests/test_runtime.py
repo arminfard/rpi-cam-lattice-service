@@ -1,18 +1,18 @@
-"""Service: on-demand publishing, offline publish, workers and log noise."""
+"""Runtime: on-demand publishing, offline publish, workers and log noise."""
 
 import logging
 import threading
 from datetime import UTC, datetime
 
-from service.config import Config
-from service.entity import (
+from lattice_cam.config import Config
+from lattice_cam.entity import (
     CameraObservation,
     EntityBuilder,
     MediaContributor,
     SensorsContributor,
 )
-from service.health import HealthContributor
-from service.service import FAILURE_LOG_EVERY, Service
+from lattice_cam.health import HealthContributor
+from lattice_cam.runtime import FAILURE_LOG_EVERY, Runtime
 
 
 class FakeEntities:
@@ -55,7 +55,7 @@ def _builder(cfg: Config, video_id: str | None = "vid-1") -> EntityBuilder:
 def test_publish_now_uses_builder_and_entities_facade():
     cfg = _config()
     client = FakeClient()
-    svc = Service(cfg, client, builder=_builder(cfg))
+    svc = Runtime(cfg, client, builder=_builder(cfg))
     svc.publish_now()
     svc.publish_now(timeout_ms=250)
 
@@ -73,7 +73,7 @@ def test_publish_now_uses_builder_and_entities_facade():
 
 def test_publish_now_raises_on_failure():
     cfg = _config()
-    svc = Service(cfg, FakeClient(fail_first=1), builder=_builder(cfg))
+    svc = Runtime(cfg, FakeClient(fail_first=1), builder=_builder(cfg))
     try:
         svc.publish_now()
     except RuntimeError:
@@ -85,7 +85,7 @@ def test_publish_now_raises_on_failure():
 def test_publish_offline_marks_entity_offline():
     cfg = _config()
     client = FakeClient()
-    Service(cfg, client, builder=_builder(cfg)).publish_offline()
+    Runtime(cfg, client, builder=_builder(cfg)).publish_offline()
     e = client.entities.requests[0].entity
     assert e.health.connection_status.name == "OFFLINE"
     assert e.sensors.sensors[0].operational_state.name == "OFF"
@@ -93,8 +93,8 @@ def test_publish_offline_marks_entity_offline():
 
 def test_publish_offline_swallows_failures(caplog):
     cfg = _config()
-    svc = Service(cfg, FakeClient(fail_first=1), builder=_builder(cfg))
-    with caplog.at_level(logging.WARNING, logger="rpi_cam_lattice_service.service"):
+    svc = Runtime(cfg, FakeClient(fail_first=1), builder=_builder(cfg))
+    with caplog.at_level(logging.WARNING, logger="lattice_cam.runtime"):
         svc.publish_offline()  # must not raise
     assert any("offline publish failed" in r.getMessage() for r in caplog.records)
 
@@ -112,7 +112,7 @@ def test_workers_run_on_named_threads_with_stop_event():
 
         return worker
 
-    svc = Service(
+    svc = Runtime(
         cfg,
         FakeClient(),
         builder=_builder(cfg),
@@ -135,8 +135,8 @@ def test_workers_run_on_named_threads_with_stop_event():
 def test_consecutive_failures_are_logged_sparsely(caplog):
     cfg = _config()
     failures = FAILURE_LOG_EVERY * 2 + 5
-    svc = Service(cfg, FakeClient(fail_first=failures), builder=_builder(cfg))
-    with caplog.at_level(logging.DEBUG, logger="rpi_cam_lattice_service.service"):
+    svc = Runtime(cfg, FakeClient(fail_first=failures), builder=_builder(cfg))
+    with caplog.at_level(logging.DEBUG, logger="lattice_cam.runtime"):
         for _ in range(failures + 2):
             svc._tick(svc.entity_id)
 
@@ -157,8 +157,8 @@ def test_consecutive_failures_are_logged_sparsely(caplog):
 
 def test_success_without_prior_failure_does_not_log_recovery(caplog):
     cfg = _config()
-    svc = Service(cfg, FakeClient(), builder=_builder(cfg))
-    with caplog.at_level(logging.DEBUG, logger="rpi_cam_lattice_service.service"):
+    svc = Runtime(cfg, FakeClient(), builder=_builder(cfg))
+    with caplog.at_level(logging.DEBUG, logger="lattice_cam.runtime"):
         svc._tick(svc.entity_id)
         svc._tick(svc.entity_id)
     assert not [r for r in caplog.records if r.getMessage() == "publish recovered"]
