@@ -71,7 +71,7 @@ def _builder(
                 lambda: CameraObservation(desired_on=desired_on, ready=ready, degraded=degraded)
             ),
             MediaContributor(lambda: video_id),
-            TaskCatalogContributor(urls or []),
+            TaskCatalogContributor(lambda: urls or []),
             # The real contributor with no snapshot: health present, NOT_READY.
             # Its full mapping is covered in test_health.py.
             HealthContributor(lambda: None),
@@ -305,6 +305,24 @@ def test_task_catalog_present_when_urls_given():
 def test_task_catalog_absent_when_no_urls():
     req = _builder(_config(), urls=[]).build(now=NOW)
     assert req.entity.task_catalog is None
+
+
+def test_task_catalog_is_reread_on_every_build():
+    # The catalog is how the agent enables/disables tasks, so it must follow
+    # the source between builds rather than be fixed at construction.
+    offered = [URLS[0]]
+    cfg = _config()
+    builder = EntityBuilder(
+        cfg,
+        entity_id=cfg.entity_id,
+        created_time=CREATED,
+        contributors=[TaskCatalogContributor(lambda: offered)],
+    )
+    first = builder.build(now=NOW).entity.task_catalog
+    offered[:] = [URLS[1]]
+    second = builder.build(now=NOW).entity.task_catalog
+    assert [d.task_specification_url for d in first.task_definitions] == [URLS[0]]
+    assert [d.task_specification_url for d in second.task_definitions] == [URLS[1]]
 
 
 # -- health ----------------------------------------------------------------

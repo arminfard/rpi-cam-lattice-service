@@ -181,7 +181,12 @@ def _build_entity_builder(
         HealthContributor(health_snapshot),
     ]
     if task_handler is not None:
-        contributors.append(TaskCatalogContributor(task_handler.task_specification_urls))
+        # The catalog follows the stream state: Start is withdrawn once the
+        # stream is on, Stop once it is off (see TaskHandler.offered_task_urls).
+        handler = task_handler
+        contributors.append(
+            TaskCatalogContributor(lambda: handler.offered_task_urls(control.snapshot().desired_on))
+        )
     return EntityBuilder(
         config,
         entity_id=config.entity_id,
@@ -280,7 +285,8 @@ def main(argv: list[str] | None = None) -> int:
             workers.append(("health", health.run))
         runtime = Runtime(config, client, builder=builder, workers=workers)
         # Start/Stop push their outcome to the asset immediately (Media item
-        # added or cleared) instead of waiting for the next 1 Hz tick.
+        # added or cleared, the task just run withdrawn from the catalog)
+        # instead of waiting for the next 1 Hz tick.
         control.on_change = runtime.publish_now
 
         # Archive an ingress a crashed predecessor never cleaned up, then

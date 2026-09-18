@@ -8,9 +8,9 @@ client, creates a Start or Stop task assigned to the camera entity, then polls
 the task until it reaches a terminal state, proving the server-side lifecycle
 (SENT -> EXECUTING -> DONE_OK).
 
-Task creation is kept out of the installed package on purpose (guarded by
-``tests/test_agent_only.py``), so the operator-side calls live here as plain
-functions over the public ``client.tasks.stub`` and ``client.auth``.
+Task creation is kept out of the installed package on purpose, so the
+operator-side calls live here as plain functions over the public
+``client.tasks.stub`` and ``client.auth``.
 
 Usage:
     python scripts/send_task.py --config .env Stop

@@ -12,7 +12,7 @@ each consumer talks to exactly the surface it needs:
 
 The task surface inside the package is deliberately limited to what an agent
 needs (listen and report status); task creation lives only in
-``scripts/send_task.py`` and is guarded by ``tests/test_agent_only.py``.
+``scripts/send_task.py``.
 """
 
 from __future__ import annotations

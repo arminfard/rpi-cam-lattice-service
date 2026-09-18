@@ -15,7 +15,7 @@ sources (``lambda: CameraObservation(...)``).
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -151,18 +151,22 @@ class MediaContributor:
 
 
 class TaskCatalogContributor:
-    """Advertises the task specification URLs the camera accepts.
+    """Advertises the task specification URLs the camera accepts right now.
 
-    An operator can only assign a task the catalog lists. With no URLs the
-    component is left unset (tasking disabled).
+    An operator can only assign a task the catalog lists, so the catalog is
+    how the agent enables and disables its tasks: ``urls`` is re-read on every
+    build and returns only the tasks that apply to the current state (after a
+    Start only Stop, after a Stop only Start; ``TaskHandler.offered_task_urls``).
+    With no URLs the component is left unset (tasking disabled).
     """
 
-    def __init__(self, urls: list[str]) -> None:
-        self._urls = list(urls)
+    def __init__(self, urls: Callable[[], Sequence[str]]) -> None:
+        self._urls = urls
 
     def apply(self, entity: Entity, ctx: BuildContext) -> None:
-        if not self._urls:
+        urls = list(self._urls())
+        if not urls:
             return
         entity.task_catalog = TaskCatalog(
-            task_definitions=[TaskDefinition(task_specification_url=url) for url in self._urls]
+            task_definitions=[TaskDefinition(task_specification_url=url) for url in urls]
         )

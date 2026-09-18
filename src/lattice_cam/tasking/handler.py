@@ -1,7 +1,9 @@
 """Lattice task handling for the camera agent.
 
 The camera entity advertises a ``task_catalog`` listing the custom task types
-it accepts (see ``task-def/``). This module opens the ``ListenAsAgent`` stream
+it accepts (see ``task-def/``): only the one that would change the stream, so
+``Start`` disappears from the operator's menu once the stream is on and
+``Stop`` once it is off. This module opens the ``ListenAsAgent`` stream
 for that entity, dispatches each ``ExecuteRequest`` on the *name* of the task
 message carried in the specification's type URL, runs the matching action on
 the camera control, and drives the task through its status lifecycle:
@@ -87,8 +89,7 @@ class _ActiveTask:
         self.task = task
         self.task_id = task.version.task_id
         self.definition_version = task.version.definition_version
-        # Lattice ignores updates whose version is not greater than what it
-        # already holds, so continue from the version the task arrived with
+        # Continue from the version the task arrived with
         # and track every higher version the server reports back.
         self.status_version = task.version.status_version
         self.cancel = threading.Event()
@@ -146,8 +147,21 @@ class TaskHandler:
 
     @property
     def task_specification_urls(self) -> list[str]:
-        """Type URLs to advertise in the entity's ``task_catalog``."""
+        """Every type URL the handler can execute."""
         return list(self._actions)
+
+    def offered_task_urls(self, desired_on: bool) -> list[str]:
+        """The ``task_catalog`` for the current stream state.
+
+        Only the transition that changes the state is offered: ``Stop`` while
+        the stream is on, ``Start`` while it is off. The entity is republished
+        right after each transition (``CameraControl.on_change``), so the task
+        just executed drops out of the operator's menu and its counterpart
+        appears. A failed transition leaves the state, and so the catalog,
+        unchanged: the same task stays offered as the retry.
+        """
+        name = TASK_STOP if desired_on else TASK_START
+        return [task_type_url(self._package, name)]
 
     # -- stream state --------------------------------------------------------
 

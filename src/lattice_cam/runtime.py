@@ -137,9 +137,11 @@ class Runtime:
     def publish_now(self, *, timeout_ms: int = PUBLISH_TIMEOUT_MS) -> None:
         """Publish the entity immediately from the current observed state.
 
-        Used by Start/Stop transitions so the asset's Media item and sensor
-        state change as part of the task rather than on the next tick. Raises
-        on failure; the periodic loop keeps republishing regardless.
+        Used by Start/Stop transitions so the asset's Media item, sensor
+        state and task catalog (the task just executed is withdrawn, its
+        counterpart offered) change as part of the task rather than on the
+        next tick. Raises on failure; the periodic loop keeps republishing
+        regardless.
         """
         request = self._builder.build()
         self._client.entities.publish_entity(request, timeout_ms=timeout_ms)

@@ -93,7 +93,8 @@ class CameraControl:
         # Called (outside every lock) once a transition has taken effect, to
         # push the new state to the camera asset entity immediately: the new
         # ingress id into its Media items after Start, an empty Media list
-        # after Stop. Wired to ``Runtime.publish_now``.
+        # after Stop, and a task catalog offering only the opposite task.
+        # Wired to ``Runtime.publish_now``.
         self.on_change = on_change
         self._desired_on = desired_on
         self._in_transition = False
