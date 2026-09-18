@@ -1,4 +1,4 @@
-# Buf module for the rpi-cam-lattice-service custom task definitions.
+# Buf module for the lattice-cam custom task definitions.
 #
 # Push to the Lattice Schema Registry (LSR) from this directory:
 #   buf lint && buf build && buf push

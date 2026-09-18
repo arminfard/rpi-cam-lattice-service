@@ -1,4 +1,4 @@
-# sudoers drop-in for rpi-cam-lattice-service.
+# sudoers drop-in for lattice-cam.
 #
 # The daemon runs unprivileged (User=@SERVICE_USER@ in the systemd unit) and handles
 # Lattice Start/Stop tasks by running TASK_START_COMMAND / TASK_STOP_COMMAND
@@ -10,12 +10,12 @@
 # .env (sudo matches the full command line).
 #
 # PLACEHOLDER: @SERVICE_USER@ is the account in User= of
-# deploy/systemd/rpi-cam-lattice-service.service; `make install-units` renders
+# deploy/systemd/lattice-cam.service; `make install-units` renders
 # it (default: the invoking user).
 #
 # Validate, then install with mode 0440 (or run `make install-units`):
-#   visudo -cf build/deploy/sudoers.d/rpi-cam-lattice-service   # the rendered file
-#   sudo install -m 0440 -o root -g root build/deploy/sudoers.d/rpi-cam-lattice-service /etc/sudoers.d/rpi-cam-lattice-service
+#   visudo -cf build/deploy/sudoers.d/lattice-cam   # the rendered file
+#   sudo install -m 0440 -o root -g root build/deploy/sudoers.d/lattice-cam /etc/sudoers.d/lattice-cam
 # Verify as the service account:
 #   sudo -n -l | grep mediamtx-srt
 

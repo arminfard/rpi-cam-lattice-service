@@ -62,7 +62,7 @@ CREATED_TIME_KEY = "created_time"
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="rpi-cam-lattice-service",
+        prog="lattice-cam",
         description="Publish a Raspberry Pi camera as a Lattice entity via gRPC (Connect).",
     )
     parser.add_argument(

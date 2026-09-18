@@ -95,7 +95,7 @@ def test_base_entity_identity():
     assert e.ontology.platform_type == "Camera"
     assert e.mil_view.disposition == Disposition.FRIENDLY
     assert e.mil_view.environment == Environment.LAND
-    assert e.provenance.integration_name == "rpi-cam-lattice-service"
+    assert e.provenance.integration_name == "lattice-cam"
     assert e.provenance.data_type == "camera"
     assert e.provenance.source_update_time.to_datetime() == NOW
     # No observed components on the floor.

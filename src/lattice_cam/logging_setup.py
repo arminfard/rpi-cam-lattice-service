@@ -71,5 +71,5 @@ def configure(debug: bool = False) -> None:
     root.setLevel(logging.DEBUG if debug else logging.INFO)
 
 
-def get_logger(name: str = "rpi-cam-lattice-service") -> StructuredLogger:
+def get_logger(name: str = "lattice-cam") -> StructuredLogger:
     return StructuredLogger(logging.getLogger(name))

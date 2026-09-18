@@ -20,7 +20,7 @@ fi
 # requirements.txt carries the --extra-index-url for the Lattice SDK packages
 # (served from Anduril's schema registry, not PyPI) and the exact pins.
 "$VENV/bin/python" -m pip install -r "$REPO_DIR/requirements.txt"
-# Editable install of the daemon (console script rpi-cam-lattice-service) plus
+# Editable install of the daemon (console script lattice-cam) plus
 # the dev tools: pytest, ruff, mypy.
 "$VENV/bin/python" -m pip install -e "$REPO_DIR[dev]"
 
@@ -32,11 +32,11 @@ Next steps:
   1. cp .env.example .env            # then fill in LATTICE_ENDPOINT, the token, camera position...
   2. ./scripts/install-mediamtx.sh    # downloads the MediaMTX binary into the repo (on the Pi)
   3. Edit the placeholders (project path, User=/Group=, account name) in
-       deploy/systemd/rpi-cam-lattice-service.service
+       deploy/systemd/lattice-cam.service
        deploy/systemd/mediamtx-srt.service
-       deploy/sudoers.d/rpi-cam-lattice-service
+       deploy/sudoers.d/lattice-cam
      then: make install-units        # copies units + sudoers rule (uses sudo)
-  4. sudo systemctl enable --now rpi-cam-lattice-service
+  4. sudo systemctl enable --now lattice-cam
      (do NOT enable mediamtx-srt; the daemon starts it on a Lattice Start task)
 
 Checks: make check   (ruff, mypy, pytest)

@@ -1,4 +1,4 @@
-"""rpi-cam-lattice-service — a Raspberry Pi camera Lattice integration built on the
+"""lattice-cam — a Raspberry Pi camera Lattice integration built on the
 Lattice SDK for gRPC (Connect) in Python.
 
 A long-running daemon that publishes the camera as a stationary asset entity

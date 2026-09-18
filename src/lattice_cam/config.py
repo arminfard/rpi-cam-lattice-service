@@ -96,7 +96,7 @@ class Config:
     entity_id: str = ""
     entity_name: str = "RPi Camera"
     platform_type: str = "Camera"
-    integration_name: str = "rpi-cam-lattice-service"
+    integration_name: str = "lattice-cam"
     # mil_view.nationality, as an SDK ``Nationality`` member name (for example
     # UNITED_STATES_OF_AMERICA, UNITED_KINGDOM, GERMANY). Validated at startup.
     nationality: str = "UNITED_STATES_OF_AMERICA"

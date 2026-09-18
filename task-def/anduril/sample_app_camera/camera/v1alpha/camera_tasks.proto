@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-// Custom Lattice task definitions for rpi-cam-lattice-service.
+// Custom Lattice task definitions for lattice-cam.
 //
 // Fully qualified names (and the type URLs advertised in the entity's
 // task_catalog) are:

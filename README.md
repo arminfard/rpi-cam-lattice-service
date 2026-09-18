@@ -1,4 +1,4 @@
-# rpi-cam-lattice-service
+# lattice-cam
 
 A Raspberry Pi camera published to Lattice with the Python gRPC (Connect) SDK.
 The camera appears as a stationary asset with an EO sensor, a live SRT video
@@ -12,7 +12,7 @@ Camera and pushes H.264 over SRT to the ingress URL Lattice returned.
 ```mermaid
 flowchart LR
     lattice["Lattice"]
-    daemon["rpi-cam-lattice-service<br/>entity, ingress, tasks, health"]
+    daemon["lattice-cam<br/>entity, ingress, tasks, health"]
     mtx["mediamtx-srt<br/>rpiCamera → ffmpeg → SRT"]
     daemon -->|"PublishEntity, Create/DeleteIngressStream, UpdateStatus"| lattice
     lattice -.->|"Start / Stop tasks"| daemon
@@ -56,7 +56,7 @@ sudoers rule byte for byte.
 ## Run and verify
 
 ```bash
-.venv/bin/rpi-cam-lattice-service --config .env          # or the systemd unit
+.venv/bin/lattice-cam --config .env                      # or the systemd unit
 .venv/bin/python scripts/verify.py --config .env         # read the entity back: media, sensor, catalog, health
 .venv/bin/python scripts/send_task.py --config .env Stop  # SENT -> EXECUTING -> DONE_OK; then Start
 make check                                                # ruff, mypy, pytest
@@ -72,9 +72,9 @@ The files under `deploy/` are templates. `make install-units` renders
 user), validates the sudoers rule, installs both units, and reloads systemd.
 
 ```bash
-make install-units [SERVICE_USER=rpi-cam INSTALL_DIR=/opt/rpi-cam-lattice-service]
-sudo systemctl enable --now rpi-cam-lattice-service
-journalctl -u rpi-cam-lattice-service -u mediamtx-srt -f
+make install-units [SERVICE_USER=rpi-cam INSTALL_DIR=/opt/lattice-cam]
+sudo systemctl enable --now lattice-cam
+journalctl -u lattice-cam -u mediamtx-srt -f
 ```
 
 The daemon runs unprivileged and may run exactly two commands through sudo:
@@ -89,7 +89,7 @@ On a Pi that already runs the integration, pull the new version and:
 ```bash
 make install                                       # rebuild .venv against the pinned SDK
 make install-units                                 # re-render and install units + sudoers rule
-sudo systemctl restart rpi-cam-lattice-service     # stops MediaMTX, archives the ingress, starts fresh
+sudo systemctl restart lattice-cam                 # stops MediaMTX, archives the ingress, starts fresh
 .venv/bin/python scripts/verify.py --config .env   # confirm the entity reads back as expected
 ```
 
@@ -104,6 +104,20 @@ run these first:
 sudo chown "$USER:$USER" srt_target.env      # root-owned file from the old run
 sudo systemctl disable --now mediamtx-srt    # the daemon starts it from now on
 ```
+
+The unit, sudoers rule and console script were renamed from
+`rpi-cam-lattice-service` to `lattice-cam`. On an install that predates the
+rename, retire the old names before `make install-units`:
+
+```bash
+sudo systemctl disable --now rpi-cam-lattice-service
+sudo rm /etc/systemd/system/rpi-cam-lattice-service.service /etc/sudoers.d/rpi-cam-lattice-service
+.venv/bin/pip uninstall -y rpi-cam-lattice-service   # drops the old console script
+```
+
+The derived entity id also changed with the name. An install that keeps its
+`state.json` keeps its old id (the recorded id wins); a fresh install or one
+that lost the state file publishes a new entity, and the old one expires.
 
 ## Add a new component
 

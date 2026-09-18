@@ -27,9 +27,7 @@ from ..state import StateStore
 logger = get_logger(__name__)
 
 STATE_KEY = "entity_id"
-
-# Namespace for the derived id. Fixed forever: changing it would give every
-# deployed camera a new identity.
+# Namespace for the derived id.
 NAMESPACE = uuid.UUID("6f0f1c0e-2a5c-4d3a-9d2b-0c7e5a1b8f42")
 
 
@@ -43,7 +41,7 @@ def canonical_uuid(value: str) -> str | None:
 
 def derived_entity_id(hardware_serial: str) -> str:
     """The deterministic id for a board, from its hardware serial."""
-    return str(uuid.uuid5(NAMESPACE, f"rpi-cam-lattice-service:{hardware_serial.strip()}"))
+    return str(uuid.uuid5(NAMESPACE, f"lattice-cam:{hardware_serial.strip()}"))
 
 
 def resolve_entity_id(config: Config, state: StateStore, hardware_serial: str | None) -> str:
