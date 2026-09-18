@@ -14,15 +14,15 @@ import uuid
 
 import pytest
 
-from rpi_cam_lattice_service.camera.control import (
+from service.camera.control import (
     CameraControl,
     CameraControlError,
     ControlSnapshot,
 )
-from rpi_cam_lattice_service.camera.ingress import STATE_KEY, VideoIngress
-from rpi_cam_lattice_service.camera.pipeline import CommandPipeline, PipelineError
-from rpi_cam_lattice_service.lattice import SrtIngressInfo
-from rpi_cam_lattice_service.state import StateStore
+from service.camera.ingress import STATE_KEY, VideoIngress
+from service.camera.pipeline import CommandPipeline, PipelineError
+from service.lattice import SrtIngressInfo
+from service.state import StateStore
 
 
 class FakeVideoClient:

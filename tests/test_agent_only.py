@@ -7,9 +7,9 @@ task creation ever leaks into the installed service package.
 
 from pathlib import Path
 
-import rpi_cam_lattice_service
+import service
 
-PACKAGE_DIR = Path(rpi_cam_lattice_service.__file__).parent
+PACKAGE_DIR = Path(service.__file__).parent
 FORBIDDEN = ("create_task(", "CreateTaskRequest")
 
 

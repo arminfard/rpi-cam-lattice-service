@@ -4,15 +4,15 @@ import logging
 import threading
 from datetime import UTC, datetime
 
-from rpi_cam_lattice_service.config import Config
-from rpi_cam_lattice_service.entity import (
+from service.config import Config
+from service.entity import (
     CameraObservation,
     EntityBuilder,
     MediaContributor,
     SensorsContributor,
 )
-from rpi_cam_lattice_service.health import HealthContributor
-from rpi_cam_lattice_service.service import FAILURE_LOG_EVERY, Service
+from service.health import HealthContributor
+from service.service import FAILURE_LOG_EVERY, Service
 
 
 class FakeEntities:

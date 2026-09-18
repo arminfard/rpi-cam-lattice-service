@@ -2,7 +2,7 @@
 
 import json
 
-from rpi_cam_lattice_service.state import StateStore
+from service.state import StateStore
 
 
 def test_roundtrip_persists_across_instances(tmp_path):

@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from rpi_cam_lattice_service.camera.pipeline import (
+from service.camera.pipeline import (
     CommandPipeline,
     MediaMtxStatusProbe,
     PipelineError,

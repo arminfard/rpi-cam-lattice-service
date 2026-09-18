@@ -27,12 +27,12 @@ from anduril.videomanager.v1.srt_ingress_pub_pb import SrtIngress
 from protobuf import Oneof
 from pyqwest import SyncClient
 
-from rpi_cam_lattice_service.config import Config
-from rpi_cam_lattice_service.lattice import LatticeClient, SrtIngressInfo
-from rpi_cam_lattice_service.lattice.auth import AuthProvider
-from rpi_cam_lattice_service.lattice.entities import EntityClient
-from rpi_cam_lattice_service.lattice.tasks import TaskClient
-from rpi_cam_lattice_service.lattice.video import VideoClient
+from service.config import Config
+from service.lattice import LatticeClient, SrtIngressInfo
+from service.lattice.auth import AuthProvider
+from service.lattice.entities import EntityClient
+from service.lattice.tasks import TaskClient
+from service.lattice.video import VideoClient
 
 BASE_URL = "https://example.test"
 HEADERS = {"authorization": "Bearer tok", "anduril-sandbox-authorization": "Bearer sb"}

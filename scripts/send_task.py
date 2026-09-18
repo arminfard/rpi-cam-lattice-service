@@ -40,12 +40,12 @@ from anduril.taskmanager.v1.task_pub_pb import (  # noqa: E402
 from protobuf import Oneof  # noqa: E402
 from protobuf.wkt import any_pb  # noqa: E402
 
-from rpi_cam_lattice_service import config as config_module  # noqa: E402
-from rpi_cam_lattice_service.camera.source import pi_serial_number  # noqa: E402
-from rpi_cam_lattice_service.entity.identity import resolve_entity_id  # noqa: E402
-from rpi_cam_lattice_service.lattice import LatticeClient  # noqa: E402
-from rpi_cam_lattice_service.state import StateStore  # noqa: E402
-from rpi_cam_lattice_service.tasking.definitions import (  # noqa: E402
+from service import config as config_module  # noqa: E402
+from service.camera.source import pi_serial_number  # noqa: E402
+from service.entity.identity import resolve_entity_id  # noqa: E402
+from service.lattice import LatticeClient  # noqa: E402
+from service.state import StateStore  # noqa: E402
+from service.tasking.definitions import (  # noqa: E402
     SUPPORTED_TASKS,
     task_type_url,
 )

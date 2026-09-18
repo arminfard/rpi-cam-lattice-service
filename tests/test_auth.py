@@ -6,8 +6,8 @@ from __future__ import annotations
 import threading
 import time
 
-from rpi_cam_lattice_service.config import Config
-from rpi_cam_lattice_service.lattice.auth import AuthProvider
+from service.config import Config
+from service.lattice.auth import AuthProvider
 
 
 class FakeResponse:

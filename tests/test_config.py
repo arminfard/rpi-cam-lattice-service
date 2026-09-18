@@ -2,7 +2,7 @@
 
 import pytest
 
-from rpi_cam_lattice_service.config import Config, ConfigError, load
+from service.config import Config, ConfigError, load
 
 _KEYS = [
     "LATTICE_ENDPOINT",

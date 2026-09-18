@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import uuid
 
-from rpi_cam_lattice_service.config import Config
-from rpi_cam_lattice_service.entity.identity import (
+from service.config import Config
+from service.entity.identity import (
     STATE_KEY,
     canonical_uuid,
     derived_entity_id,
     resolve_entity_id,
 )
-from rpi_cam_lattice_service.state import StateStore
+from service.state import StateStore
 
 SERIAL = "10000000deadbeef"
 

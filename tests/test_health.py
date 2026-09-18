@@ -20,12 +20,12 @@ from anduril.entitymanager.v1.health_status_pub_pb import (
     HealthStatus,
 )
 
-from rpi_cam_lattice_service import main as main_module
-from rpi_cam_lattice_service.camera.control import CameraControl
-from rpi_cam_lattice_service.camera.pipeline import CommandPipeline, PipelineStatus
-from rpi_cam_lattice_service.config import Config
-from rpi_cam_lattice_service.entity import BuildContext, EntityBuilder
-from rpi_cam_lattice_service.health import (
+from service import main as main_module
+from service.camera.control import CameraControl
+from service.camera.pipeline import CommandPipeline, PipelineStatus
+from service.config import Config
+from service.entity import BuildContext, EntityBuilder
+from service.health import (
     AlertLevel,
     AlertReport,
     ComponentReport,
@@ -43,8 +43,8 @@ from rpi_cam_lattice_service.health import (
     ThrottledFlags,
     ThrottledFlagsReader,
 )
-from rpi_cam_lattice_service.health.probes import _Activation
-from rpi_cam_lattice_service.tasking.handler import TaskStreamState
+from service.health.probes import _Activation
+from service.tasking.handler import TaskStreamState
 
 NOW = datetime(2026, 9, 16, 12, 0, 0, tzinfo=UTC)
 LATER = NOW + timedelta(seconds=5)
