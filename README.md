@@ -115,8 +115,8 @@ sudo rm /etc/systemd/system/rpi-cam-lattice-service.service /etc/sudoers.d/rpi-c
 .venv/bin/pip uninstall -y rpi-cam-lattice-service   # drops the old console script
 ```
 
-The derived entity id also changed with the name. An install that keeps its
-`state.json` keeps its old id (the recorded id wins); a fresh install or one
+The derived entity id also changes with the name. An install that keeps its
+`state.json` keeps its old, while a new install, or one
 that lost the state file publishes a new entity, and the old one expires.
 
 ## Add a new component
